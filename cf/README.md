@@ -110,8 +110,13 @@ die Zeile.
 
 ## Offen
 
-- **Beat** läuft, aber ob eine geplante Aufgabe zu ihrer Zeit auch ausgeführt
-  wird, ist erst nach einem Tag Laufzeit messbar.
+- **Beat** ist unter CNB noch nicht gestaged: Beim gemeinsamen Push mit dem
+  Worker lief das Staging in den Timeout der Plattform (15 Minuten,
+  `staging.timeout_in_seconds` im capi-Chart), der Build allein brauchte
+  8,5 Minuten. Der Wiederholungsversuch wurde abgebrochen. Nächster Schritt:
+  `cf push wger-beat -f cf/manifest.yml` allein, ohne paralleles Staging.
+  Ob eine geplante Aufgabe zu ihrer Zeit läuft, ist erst nach einem Tag
+  Laufzeit messbar.
 - **S3**: kein Angebot auf der lokalen Plattform. Der Zweig in
   `cf/settings.py` ist ungetestet.
 - **E-Mail**: Upstream braucht `ENABLE_EMAIL` plus SMTP-Variablen; lokal gibt
