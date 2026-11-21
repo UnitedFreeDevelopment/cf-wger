@@ -108,6 +108,43 @@ Die Route ist lokal nur per HTTP erreichbar; `WGER_SITE_SCHEME: http` im
 Manifest sagt das der App. Auf einer Plattform mit TLS-Terminierung entfällt
 die Zeile.
 
+## Was Cloud Foundry der App bringt
+
+Gemessen am 2026-11-21 an `wger-web` auf `cfk8s-platform`, Monitor im
+Sekundentakt gegen `/api/v2/version/` und die Startseite.
+
+| Fähigkeit | Auf der Plattform | Für wger | Messung |
+|---|---|---|---|
+| Horizontal skalieren (`cf scale -i N`) | ja | ja, weil Sessions und Login-Sperren in der Datenbank liegen | 2 Instanzen, 10 Aufrufe mit Session, 5/5 auf beide verteilt, alle angemeldet |
+| Rolling Deployment (`cf push --strategy rolling`) | ja, mit `--max-in-flight` | ja | 236 Messpunkte, 0 Fehler, Umschaltung 45 s |
+| Canary (`--strategy canary`, `--instance-steps`, `cf continue-deployment`) | ja | ja | 2 alte Instanzen plus 1 Canary in der Pause, danach ausgerollt, 71 Messpunkte, 0 Fehler |
+| Revisionen und Rücknahme (`cf revisions`, `cf rollback --version N`) | ja | ja, ohne neues Staging | Rollback auf Revision 1 als Canary, Revision 3 angelegt |
+| Tasks (`cf run-task`) | ja, maximal 2 GB Platte | ja, für Migrationen, Fixtures, Synchronisation | `init`-Task, siehe oben |
+| Health Check `http` | ja | ja, `/api/v2/version/` antwortet ohne Datenbank | Staging und Deployments warten darauf |
+| Stoppsignal mit 10 s Frist | ja | Worker beendet sich in 5 s mit Exit 0 und verbindet sich neu | `cf restart wger-worker` |
+| `cf ssh`, `cf logs`, `cf events` | ja | ja, alle Prozesse loggen auf stdout | genutzt |
+| Container-zu-Container-Netz (`apps.internal`, `cf add-network-policy`) | ja | noch nicht gebraucht; der Weg für einen internen Sprachdienst | nicht gemessen |
+| Security Groups | `public_networks` für Staging und Laufzeit | nötig für pip beim Staging und `sync-exercises` zur Laufzeit | Staging lädt von PyPI |
+| Autoscaler, Scheduler-Dienst, Log-Drain-Ziel, Route Services | nicht installiert | Beat ersetzt den Scheduler; Autoscaling wäre bei Bedarf nachzurüsten | `cf marketplace`, `cf plugins` |
+
+**Was bei Rolling und Canary zu beachten ist.** Während der Umschaltung
+laufen alte und neue Version gleichzeitig gegen dieselbe Datenbank.
+
+- Migrationen dürfen dann nur ergänzen, nichts umbenennen oder löschen;
+  Upstream-Migrationen sind das nicht immer. Sicher ist: `init`-Task vor dem
+  Push, wenn die Migration abwärtskompatibel ist, sonst `cf push` ohne
+  Strategie mit kurzem Ausfall.
+- Statische Dateien tragen Hash-Namen aus dem jeweiligen Build. In der
+  Überlappung kann eine alte Instanz eine neue Hash-Datei nicht liefern,
+  das ergibt ein 404 bei einem Teil der Seitenaufrufe. Mit S3 für
+  `staticfiles/` läge beides nebeneinander; ohne S3 hilft nur
+  `--max-in-flight 1` und ein kurzes Fenster. Im Monitor war das nicht zu
+  sehen, weil er nur HTML und die API abgefragt hat.
+- `wger-beat` nicht rollend ausrollen: zwei Beats im Überlappungsfenster
+  feuern geplante Aufgaben doppelt. Ohne Strategie pushen, der kurze Ausfall
+  ist für Beat belanglos.
+- `wger-worker` kann rollend, der Warm Shutdown ist gemessen.
+
 ## Offen
 
 - **Staging-Zeit**: Beim gemeinsamen Push aller drei Apps lief Beat in den
