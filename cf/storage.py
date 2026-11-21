@@ -7,8 +7,10 @@
 # collectstatic daran ab. Upstream loest das in
 # wger.core.storage.LenientManifestStaticFilesStorage - diese Klasse haengt
 # die Nachsicht vor die Kompression, mehr nicht.
+# Third Party
 from whitenoise.storage import CompressedManifestStaticFilesStorage
 
+# wger
 from wger.core.storage import LenientManifestStaticFilesStorage
 
 

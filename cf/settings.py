@@ -12,9 +12,11 @@ Gilt fuer web, worker, beat und fuer collectstatic beim Staging - dort gibt es
 VCAP_SERVICES ebenfalls, aber keine Datenbankverbindung.
 """
 
+# Standard Library
 import json
 import os
 from urllib.parse import urlparse
+
 
 # ---------------------------------------------------------------- Bindings
 
@@ -112,8 +114,14 @@ _s3 = _binding(tags=('s3', 'object-storage', 'minio'), names=('wger-s3',))
 if _s3:
     _endpoint = _s3.get('endpoint') or _s3.get('endpoint_url') or _s3.get('url') or ''
     _setdefault('USE_S3_MEDIA_FILES', 'True')
-    _setdefault('AWS_ACCESS_KEY_ID', _s3.get('access_key_id') or _s3.get('access_key') or _s3.get('accessKey'))
-    _setdefault('AWS_SECRET_ACCESS_KEY', _s3.get('secret_access_key') or _s3.get('secret_key') or _s3.get('secretKey'))
+    _setdefault(
+        'AWS_ACCESS_KEY_ID',
+        _s3.get('access_key_id') or _s3.get('access_key') or _s3.get('accessKey'),
+    )
+    _setdefault(
+        'AWS_SECRET_ACCESS_KEY',
+        _s3.get('secret_access_key') or _s3.get('secret_key') or _s3.get('secretKey'),
+    )
     _setdefault('AWS_STORAGE_BUCKET_NAME', _s3.get('bucket') or _s3.get('bucket_name'))
     _setdefault('AWS_S3_REGION_NAME', _s3.get('region') or 'us-east-1')
     _setdefault('AWS_S3_DOMAIN', urlparse(_endpoint).hostname or '')
@@ -143,7 +151,9 @@ _uris = _app.get('application_uris') or []
 _scheme = os.environ.get('WGER_SITE_SCHEME', 'https')
 if _uris:
     _setdefault('SITE_URL', f'{_scheme}://{_uris[0]}')
-    _setdefault('CSRF_TRUSTED_ORIGINS', ','.join(f'{s}://{u}' for u in _uris for s in ('https', 'http')))
+    _setdefault(
+        'CSRF_TRUSTED_ORIGINS', ','.join(f'{s}://{u}' for u in _uris for s in ('https', 'http'))
+    )
 _setdefault('X_FORWARDED_PROTO_HEADER_SET', 'True')
 _setdefault('USE_X_FORWARDED_HOST', 'True')
 # Der Gorouter haengt die Client-Adresse an X-Forwarded-For; sonst sieht
@@ -158,10 +168,14 @@ _setdefault('AXES_IPWARE_PROXY_COUNT', '1')
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _setdefault('DJANGO_STATIC_ROOT', os.path.join(_root, 'staticfiles'))
 _setdefault('DJANGO_MEDIA_ROOT', os.path.join(_root, 'media'))
-_setdefault('DJANGO_STORAGES_STATICFILES_BACKEND', 'cf.storage.LenientCompressedManifestStaticFilesStorage')
+_setdefault(
+    'DJANGO_STORAGES_STATICFILES_BACKEND', 'cf.storage.LenientCompressedManifestStaticFilesStorage'
+)
 
 # ---------------------------------------------------------------- Upstream
+# Third Party
 from settings.main import *  # noqa: E402, F403
+
 
 # whitenoise so weit vorn wie moeglich, wie dessen Dokumentation es verlangt.
 # Upstream fuehrt keine SecurityMiddleware; an erster Stelle steht der
