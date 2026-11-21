@@ -37,6 +37,22 @@ Zugangsdaten kommen ausschließlich über Service-Bindings (`VCAP_SERVICES`), ni
 7. Ersten Test-Push zuerst ohne Worker, dann Worker und Storage ergänzen.
 8. Betrieb in der README dokumentieren.
 
+## Ressourcen beim Start (gemessen 2026-11-21, cfk8s-platform)
+
+Die Werte stehen in `cf/manifest.yml` und `cf/Makefile`; hier die Begründung, damit niemand sie „zum Sparen" senkt oder blind erhöht.
+
+| Was | Speicher | Platte | Instanzen | Gemessen |
+|---|---|---|---|---|
+| `wger-web` | 1G | 2G | 1 (2 geprüft) | 280–320 MB belegt mit zwei Gunicorn-Workern und `--preload`; 1,1 GB Platte vom Droplet. Staging läuft mit dem App-Speicher, unter 1G nicht erprobt |
+| `wger-worker` | 512M | 2G | 1 | 190 MB belegt (gevent, Concurrency 2). 2G Platte, weil es dasselbe Droplet ist |
+| `wger-beat` | 256M | 2G | **genau 1** | 160 MB belegt. Zwei Beats feuern geplante Aufgaben doppelt |
+| `init`-Task | 2G | 2G | – | mit 1G/1G stirbt die Migration `nutrition.0014` mit Exit 137; mehr als 2G Platte lässt die Plattform für Tasks nicht zu |
+| Staging (Plattform) | = App-Speicher, min. 1G | **8G** | – | CNB-Export braucht Layer, Cache-Kopie und beide Archive gleichzeitig; bei 4G räumt Kubernetes den Pod (FINDINGS #36 in `cfk8s-platform`). Wird dort gesetzt, nicht im Manifest |
+
+Reihenfolge beim ersten Start: `secrets`, `assets`, `push-web`, `init`, `push` (alles `make -f cf/Makefile …`). Die Apps nacheinander pushen, nicht in einem `cf push -f` für alle drei: parallel laufen sie in den Staging-Timeout von 15 Minuten, einzeln brauchen sie mit Build-Cache rund drei Minuten.
+
+Platte unter 2G geht nicht: das Droplet belegt 1,1 GB, davon 306 MB `lingua`, 370 MB CPython, 597 MB Pakete. Speicher von `wger-web` über `WEB_CONCURRENCY` steuern; der Bedarf je zusätzlichem Gunicorn-Worker ist nicht gemessen, vor einer Erhöhung an `cf app wger-web` ablesen.
+
 ## Hinweise
 - Das CF-Dateisystem ist flüchtig: keine lokalen Uploads.
 - Stemcells sind BOSH-Plattformebene, für die App nicht relevant. Die App läuft auf dem Root-Filesystem der Plattform (z. B. `cflinuxfs4`).
