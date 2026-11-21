@@ -1,0 +1,15 @@
+# Was nicht ins Droplet muss. cf push liest .cfignore, nicht .gitignore -
+# staticfiles/ ist gitignored, gehoert aber hinein (vorgebaut von
+# `make -f cf/Makefile assets`). node_modules/ nicht: zur Laufzeit liest
+# whitenoise nur staticfiles/, die Finder von Django laufen bei DEBUG=False nicht.
+.git/
+.github/
+.venv/
+__pycache__/
+*.pyc
+extras/
+node_modules/
+uv.lock
+package-lock.json
+media/
+*.sqlite3

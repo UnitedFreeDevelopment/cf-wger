@@ -1,0 +1,94 @@
+# Drei Apps aus einem Quellbaum: web, worker, beat. `path: ..` zeigt auf das
+# Wurzelverzeichnis, der Aufruf lautet `cf push -f cf/manifest.yml`.
+#
+# Lifecycle cnb: Cloud Native Buildpacks (Paketo python) statt des klassischen
+# python_buildpack. Paketo kennt keinen Django-Hook, deshalb liegt
+# staticfiles/ vorgebaut im Push (make -f cf/Makefile assets). Die Python-
+# Version kommt aus BP_CPYTHON_VERSION, nicht aus runtime.txt.
+#
+# Was hier NICHT steht: SECRET_KEY und andere Geheimnisse. Die kommen aus dem
+# benutzerdefinierten Dienst wger-secrets (cf/README.md).
+---
+version: 1
+applications:
+  - name: wger-web
+    path: ..
+    memory: 1G
+    # Der Buildpack laedt Python und ~100 Pakete nach; das Droplet traegt
+    # dazu node_modules/ und staticfiles/. 1G reicht dafuer nicht sicher.
+    disk_quota: 2G
+    instances: 1
+    stack: cflinuxfs4
+    lifecycle: cnb
+    buildpacks:
+      - docker://docker.io/paketobuildpacks/python
+    # --preload wie im Docker-Entrypoint von Upstream. Worker-Zahl ueber
+    # WEB_CONCURRENCY, weil 1G Speicher fuer zwei Django-Prozesse reicht,
+    # fuer vier nicht.
+    command: gunicorn wger.wsgi:application --preload --bind 0.0.0.0:$PORT --workers ${WEB_CONCURRENCY:-2} --timeout 120
+    # Es gibt keinen eigenen Health-Endpoint. /api/v2/version/ antwortet ohne
+    # Anmeldung mit 200 und beruehrt die Datenbank nicht (gemessen, siehe
+    # cf/README.md).
+    health-check-type: http
+    health-check-http-endpoint: /api/v2/version/
+    services:
+      - wger-db
+      - wger-mq
+      - wger-secrets
+    env:
+      DJANGO_SETTINGS_MODULE: cf.settings
+      PYTHONUNBUFFERED: "1"
+      BP_CPYTHON_VERSION: "3.13.*"
+      WEB_CONCURRENCY: "2"
+      # Die lokale Plattform terminiert kein TLS fuer App-Routen; SITE_URL
+      # und absolute Links muessen das wissen. Auf einer Plattform mit HTTPS
+      # entfaellt die Zeile (Default https).
+      WGER_SITE_SCHEME: http
+
+  - name: wger-worker
+    path: ..
+    memory: 512M
+    disk_quota: 2G
+    instances: 1
+    stack: cflinuxfs4
+    lifecycle: cnb
+    buildpacks:
+      - docker://docker.io/paketobuildpacks/python
+    no-route: true
+    health-check-type: process
+    # Wie extras/docker/production/celery/start-worker von Upstream.
+    command: celery --app wger worker --pool=gevent --concurrency=${CELERY_WORKER_CONCURRENCY:-2} --loglevel INFO
+    services:
+      - wger-db
+      - wger-mq
+      - wger-secrets
+    env:
+      DJANGO_SETTINGS_MODULE: cf.settings
+      PYTHONUNBUFFERED: "1"
+      BP_CPYTHON_VERSION: "3.13.*"
+      WGER_SITE_SCHEME: http
+
+  - name: wger-beat
+    path: ..
+    memory: 256M
+    disk_quota: 2G
+    # Genau eine Instanz, sonst laufen die geplanten Aufgaben doppelt.
+    instances: 1
+    stack: cflinuxfs4
+    lifecycle: cnb
+    buildpacks:
+      - docker://docker.io/paketobuildpacks/python
+    no-route: true
+    health-check-type: process
+    # Die Schedule-Datei liegt im fluechtigen Dateisystem; Beat baut sie beim
+    # Start neu auf, verloren geht dadurch nichts Wesentliches.
+    command: celery --app wger beat --loglevel INFO --schedule /tmp/celerybeat-schedule
+    services:
+      - wger-db
+      - wger-mq
+      - wger-secrets
+    env:
+      DJANGO_SETTINGS_MODULE: cf.settings
+      PYTHONUNBUFFERED: "1"
+      BP_CPYTHON_VERSION: "3.13.*"
+      WGER_SITE_SCHEME: http

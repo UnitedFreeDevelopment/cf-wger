@@ -93,3 +93,9 @@ venv-wger
 
 # macOS
 .DS_Store
+
+# Cloud Foundry (cf/): erzeugt von `make -f cf/Makefile assets`, vgl. node_modules
+wger/core/static/bootstrap-compiled.css
+wger/core/static/bootstrap-compiled.css.map
+staticfiles/
+media/
