@@ -1,0 +1,5 @@
+# Was Cloud Foundry zusaetzlich zu den Upstream-Abhaengigkeiten braucht.
+# gunicorn kommt ueber die Gruppe "docker" aus pyproject.toml mit (siehe
+# requirements.lock.txt), whitenoise liefert die statischen Dateien aus dem
+# Droplet aus - ohne Nginx, ohne Object Storage.
+whitenoise==6.12.0

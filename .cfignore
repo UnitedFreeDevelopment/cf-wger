@@ -1,0 +1,11 @@
+# Was nicht ins Droplet muss. cf push liest .cfignore, nicht .gitignore -
+# node_modules/ und bootstrap-compiled.css sind gitignored, gehoeren aber hinein.
+.git/
+.github/
+.venv/
+__pycache__/
+*.pyc
+extras/
+staticfiles/
+media/
+*.sqlite3

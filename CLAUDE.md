@@ -12,12 +12,19 @@ wger (Django, Python >= 3.12) soll als reguläre Cloud-Foundry-App mit Buildpack
 - Lizenz AGPL-3.0-or-later beachten.
 
 ## Verfügbare CF-Services
+Zielplattform (Annahme, noch nicht gemessen):
 - PostgreSQL
 - Redis
 - S3 (S3-kompatibel)
 - Mail/SMTP: ungeklärt
 
-Zugangsdaten kommen ausschließlich über Service-Bindings (`VCAP_SERVICES`), nie hartcodiert.
+Lokale Entwicklungsplattform `cfk8s-platform` (gemessen am 2026-11-21, `cf marketplace`):
+- `cnpg-postgresql` (PostgreSQL, CloudNativePG) – wird genutzt
+- `rabbitmq-cluster` – ersetzt Redis als Celery-Broker
+- **kein Redis, kein S3.** Cache und Sessions liegen deshalb in der Datenbank, Uploads im flüchtigen Dateisystem. `cf/settings.py` schaltet bei einer Redis- oder S3-Bindung automatisch um; der S3-Zweig ist gegen keine echte Bindung gemessen.
+- Der `python_buildpack` fehlt dort von Haus aus: `make cf-buildpack-python` in `cfk8s-platform` lädt ihn nach.
+
+Zugangsdaten kommen ausschließlich über Service-Bindings (`VCAP_SERVICES`), nie hartcodiert. Der `SECRET_KEY` liegt im benutzerdefinierten Dienst `wger-secrets`.
 
 ## Aufgaben (Reihenfolge)
 1. `settings/` und Umgebungsvariablen analysieren, Liste der benötigten Variablen erstellen.
