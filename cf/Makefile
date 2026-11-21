@@ -60,9 +60,13 @@ secrets:
 push-web:
 	cd "$(ROOT)" && cf push wger-web -f cf/manifest.yml
 
-## push: alle drei Apps
+## push: alle drei Apps, nacheinander
 push:
-	cd "$(ROOT)" && cf push -f cf/manifest.yml
+	@# Nacheinander statt `cf push -f cf/manifest.yml` in einem Zug: der staged
+	@# alle drei parallel, und Beat lief dabei in den Staging-Timeout der
+	@# Plattform (15 Minuten; gemessen 2026-11-21). Allein braucht jede App mit
+	@# dem Build-Cache der vorigen rund drei Minuten.
+	cd "$(ROOT)" && for app in wger-web wger-worker wger-beat; do cf push $$app -f cf/manifest.yml || exit 1; done
 
 ## init: Migrationen, Fixtures, Admin, Cache-Tabelle, Site-URL - als Task, nicht beim Start
 init:
