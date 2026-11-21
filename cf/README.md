@@ -31,7 +31,8 @@ Wurzelverzeichnis.
 | `requirements.txt`, `.python-version`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil Buildpacks sie dort suchen. `.python-version` liest der Heroku-CNB, Paketo nimmt `BP_CPYTHON_VERSION` aus dem Manifest |
 
 Upstream-Code ist nicht verändert; `.gitignore` hat vier Zeilen für
-erzeugte Dateien bekommen, die Wurzel-`README.md` einen Fork-Hinweis am Anfang.
+erzeugte Dateien bekommen. Die Wurzel-`README.md` gehört Upstream und bleibt
+unverändert; deshalb steht der Fork-Hinweis nur hier.
 
 ## Dienste
 

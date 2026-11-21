@@ -1,11 +1,3 @@
-> **Fork für Cloud Foundry.** Dies ist ein Fork von
-> [wger-project/wger](https://github.com/wger-project/wger), optimiert für den
-> Betrieb als Buildpack-App auf Cloud Foundry. Die Anwendung selbst ist
-> unverändert; alles Cloud-Foundry-Spezifische steht unter [`cf/`](cf/README.md).
-> Für die Anwendung, Fehlermeldungen und Beiträge gilt das
-> [Original-Repository](https://github.com/wger-project/wger).
-> *Fork of wger, optimized for Cloud Foundry; the application code is unchanged.*
-
 # wger
 
 <p align="center">
