@@ -22,7 +22,8 @@ Lokale Entwicklungsplattform `cfk8s-platform` (gemessen am 2026-11-21, `cf marke
 - `cnpg-postgresql` (PostgreSQL, CloudNativePG) – wird genutzt
 - `rabbitmq-cluster` – ersetzt Redis als Celery-Broker
 - **kein Redis, kein S3.** Cache und Sessions liegen deshalb in der Datenbank, Uploads im flüchtigen Dateisystem. `cf/settings.py` schaltet bei einer Redis- oder S3-Bindung automatisch um; der S3-Zweig ist gegen keine echte Bindung gemessen.
-- Der `python_buildpack` fehlt dort von Haus aus: `make cf-buildpack-python` in `cfk8s-platform` lädt ihn nach.
+- Gebaut wird mit Cloud Native Buildpacks (`lifecycle: cnb`, `paketobuildpacks/python`). Die Plattform braucht dafür 8 GB Staging-Platte: `make cf-staging-disk` in `cfk8s-platform`. Der klassische `python_buildpack` (`make cf-buildpack-python`) bleibt als Rückfall.
+- `collectstatic` läuft lokal in `make -f cf/Makefile assets`, nicht beim Staging; `staticfiles/` wird mitgepusht, `node_modules/` nicht.
 
 Zugangsdaten kommen ausschließlich über Service-Bindings (`VCAP_SERVICES`), nie hartcodiert. Der `SECRET_KEY` liegt im benutzerdefinierten Dienst `wger-secrets`.
 

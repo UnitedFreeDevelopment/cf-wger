@@ -15,11 +15,11 @@ Buildpacks statt Docker-Image. Dieses Repo ist ein Abzweig von
 |---|---|
 | `cf/settings.py` | Settings-Overlay: übersetzt `VCAP_SERVICES` in die Variablen, die `settings/main.py` liest, und importiert es danach |
 | `cf/storage.py` | whitenoise-Storage mit der Nachsicht von Upstream gegenüber fehlenden Source Maps |
-| `cf/manifest.yml` | drei Apps: `wger-web`, `wger-worker`, `wger-beat` |
-| `cf/Makefile` | Export, Asset-Build, Push, Initialisierung |
+| `cf/manifest.yml` | drei Apps: `wger-web`, `wger-worker`, `wger-beat`, Lifecycle `cnb` mit `paketobuildpacks/python` |
+| `cf/Makefile` | Export, Asset-Build mit `collectstatic`, Push, Initialisierung |
 | `cf/requirements.lock.txt` | `uv export` aus `uv.lock`, mit `gunicorn` aus der Gruppe `docker` |
 | `cf/requirements-cf.txt` | was CF zusätzlich braucht: `whitenoise` |
-| `requirements.txt`, `runtime.txt`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil der Buildpack sie dort sucht |
+| `requirements.txt`, `.python-version`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil Buildpacks sie dort suchen. `.python-version` liest der Heroku-CNB, Paketo nimmt `BP_CPYTHON_VERSION` aus dem Manifest |
 
 Upstream-Dateien sind nicht verändert; `.gitignore` hat vier Zeilen für
 erzeugte Dateien bekommen.
@@ -40,8 +40,13 @@ Uploads im flüchtigen Dateisystem und sind nach einem Neustart weg.
 
 ## Erster Start
 
-Vorher: `cf target` auf den Ziel-Space, `python_buildpack` vorhanden
-(`cf buildpacks`; auf `cfk8s-platform`: `make cf-buildpack-python`).
+Vorher: `cf target` auf den Ziel-Space. Die Plattform muss den Lifecycle
+`cnb` können (`cf push --lifecycle cnb`) und beim Staging mindestens 8 GB
+flüchtigen Speicher geben: Der CNB-Export legt Layer, Cache-Kopie und beide
+Archive gleichzeitig unter `/tmp` ab, bei 4 GB räumt Kubernetes den
+Staging-Pod (auf `cfk8s-platform`: `make cf-staging-disk`). Der klassische
+`python_buildpack` geht weiterhin: `lifecycle: cnb` und `buildpacks` im
+Manifest ersetzen, `runtime.txt` mit `python-3.13.x` anlegen.
 
 ```
 cf create-service cnpg-postgresql small wger-db
@@ -58,9 +63,22 @@ Verhalten von `wger bootstrap`). **Danach ändern.**
 
 ## Was gemessen ist
 
-- Staging mit `python_buildpack` 1.9.4, Python 3.13.15, `collectstatic` beim
-  Staging: 11 421 Dateien, Droplet 1,5 GB von 2 GB Platte. Der Löwenanteil
-  ist `fontawesomefree` (272 MB), das Upstream als pip-Paket mitbringt.
+- Staging mit `paketobuildpacks/python` (Lifecycle `cnb`), CPython 3.13.18.
+  Im Container 1,1 GB: Layer 975 MB, davon CPython 370 MB und Pakete
+  597 MB, dazu 78 MB Anwendung mit vorgebautem `staticfiles/`. Droplet
+  gepackt 392 MB. Zum Vergleich der klassische `python_buildpack`: 1,5 GB.
+- Was die Größe bestimmt und ohne Upstream-Änderung bleibt: `lingua`
+  (306 MB, eine Binärdatei mit allen Sprachmodellen, von zwei Serializern
+  beim Start importiert), `fontawesomefree` als pip-Paket (87 MB), Pakete
+  mit Bytecode (`pip-install` übergibt `--compile` fest), CPython bei Paketo
+  mit Testsuite (126 MB) und statischer Bibliothek (47 MB).
+- `staticfiles/`: 418 MB mit allem, 55 MB mit den Ausschlussmustern in
+  `cf/Makefile`; alle von den Templates referenzierten Dateien vorhanden,
+  Startseite und Hash-Dateien antworten 200. `node_modules/` (38 MB) wird
+  nicht mehr mitgepusht.
+- Am Sample `python-hello` gemessen: `heroku/buildpack-python:7.1.0` baut
+  einen Python-Layer von 47 MB (Paketo: 337 MB). Für wger nicht gemessen,
+  der Push wurde abgebrochen.
 - Healthcheck `http` auf `/api/v2/version/`: antwortet ohne Anmeldung mit 200
   und der Version, ohne Datenbank.
 - Statische Dateien mit Hash-Namen aus whitenoise: 200, richtiger Content-Type.
@@ -100,7 +118,10 @@ die Zeile.
   es keinen SMTP-Dienst. Die Zugangsdaten gehören nach `wger-secrets`.
 - **Prometheus**: `EXPOSE_PROMETHEUS_METRICS=True` schaltet `/prometheus/metrics`
   frei, unauthentifiziert und pro Prozess. Vor dem Einschalten klären.
-- **Plattenplatz**: 1,5 GB Droplet bei 2 GB Quote. Wächst `fontawesomefree`
-  oder `node_modules`, scheitert das Staging an der Platte.
+- **Heroku-CNB als nächster Hebel**: `heroku/buildpack-python` braucht am
+  Sample 290 MB weniger für Python als Paketo. Für wger: im Manifest den
+  Buildpack tauschen, `.python-version` liegt schon bereit, dann messen.
+- **Größe im Container**: 1,1 GB bei 2 GB Quote. Unter 800 MB geht es nur
+  mit einer Upstream-Änderung an `lingua` (306 MB).
 - Lizenz: wger steht unter **AGPL-3.0-or-later**; wer die Anwendung Dritten
   über ein Netz anbietet, muss die geänderten Quellen bereitstellen.

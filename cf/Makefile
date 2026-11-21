@@ -2,7 +2,9 @@
 #   make -f cf/Makefile <target>
 # Reihenfolge beim ersten Mal: secrets, assets, push-web, init, push.
 SHELL := /bin/bash
-ROOT  := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..
+# CURDIR statt $(dir ...): make zerlegt Pfade mit Leerzeichen, und das
+# Arbeitsverzeichnis hat eines. Deshalb der Aufruf aus dem Wurzelverzeichnis.
+ROOT  := $(CURDIR)
 
 .PHONY: help export assets secrets push-web push init logs clean
 
@@ -13,7 +15,7 @@ help:
 export:
 	@# --no-emit-project: wger selbst wird nicht installiert, der App-Root liegt
 	@# ohnehin auf dem sys.path. --group docker bringt gunicorn mit.
-	cd $(ROOT) && uv export --no-hashes --no-dev --no-emit-project --group docker \
+	cd "$(ROOT)" && uv export --no-hashes --no-dev --no-emit-project --group docker \
 	  --format requirements-txt -o cf/requirements.lock.txt
 
 ## assets: node_modules/ und bootstrap-compiled.css vorbauen (vor jedem push)
@@ -23,12 +25,28 @@ assets:
 	@# @wger-project/react-components einzeln, weil es als devDependency
 	@# gefuehrt wird, die Templates es aber zur Laufzeit laden. sass steht
 	@# nicht in package.json; npx holt es.
-	cd $(ROOT) && rm -rf node_modules && npm ci --omit=dev --no-audit --no-fund
-	cd $(ROOT) && P="@wger-project/react-components" && \
+	cd "$(ROOT)" && rm -rf node_modules && npm ci --omit=dev --no-audit --no-fund
+	cd "$(ROOT)" && P="@wger-project/react-components" && \
 	  V=$$(node -p "require('./package.json').devDependencies['$$P']") && \
 	  T=$$(npm pack $$P@$$V 2>/dev/null | tail -1) && \
 	  mkdir -p node_modules/$$P && tar -xzf $$T -C node_modules/$$P --strip-components=1 && rm -f $$T
-	cd $(ROOT) && npx --yes sass --quiet wger/core/static/scss/main.scss wger/core/static/bootstrap-compiled.css
+	cd "$(ROOT)" && npx --yes sass --quiet wger/core/static/scss/main.scss wger/core/static/bootstrap-compiled.css
+	@# collectstatic hier statt beim Staging: Paketo kennt keinen Django-Hook,
+	@# und ohne Ausschluss waren es 418 MB (gemessen 2026-11-21) - weil
+	@# fontawesomefree und die npm-Pakete komplett kopiert werden, obwohl die
+	@# Templates nur fontawesomefree/css, webfonts und sieben node-Dateien
+	@# laden. Verzeichnisnamen werden als Name geprueft, Dateien gegen ihren
+	@# Pfad INNERHALB des jeweiligen Static-Verzeichnisses (node_modules/ ohne
+	@# das Praefix "node/"). locales/ und muscles/ der react-components laedt
+	@# der Browser zur Laufzeit - die bleiben.
+	cd "$(ROOT)" && rm -rf staticfiles && VCAP_SERVICES='{}' VCAP_APPLICATION='{}' \
+	  DJANGO_SETTINGS_MODULE=cf.settings uv run python manage.py collectstatic --noinput \
+	  -i js-packages -i svgs -i metadata -i otfs -i sprites -i less -i scss -i assetTemplates \
+	  -i src -i "*.map" -i "*.ts" -i "*.md" -i "LICENSE*" \
+	  -i "fontawesomefree/js/*" \
+	  -i "bootstrap/js/*" -i "bootstrap/dist/css/*" -i "@popperjs/core/lib/*" -i "datatables.net/types/*" \
+	  2>&1 | grep -v "Can't find name" | tail -1
+	@cd "$(ROOT)" && du -sh staticfiles node_modules | sed 's/^/   /'
 
 ## secrets: benutzerdefinierten Dienst wger-secrets mit zufaelligem SECRET_KEY anlegen
 secrets:
@@ -40,11 +58,11 @@ secrets:
 
 ## push-web: nur wger-web (erster Push, vor init)
 push-web:
-	cd $(ROOT) && cf push wger-web -f cf/manifest.yml
+	cd "$(ROOT)" && cf push wger-web -f cf/manifest.yml
 
 ## push: alle drei Apps
 push:
-	cd $(ROOT) && cf push -f cf/manifest.yml
+	cd "$(ROOT)" && cf push -f cf/manifest.yml
 
 ## init: Migrationen, Fixtures, Admin, Cache-Tabelle, Site-URL - als Task, nicht beim Start
 init:
@@ -63,4 +81,4 @@ logs:
 
 ## clean: Bauartefakte entfernen
 clean:
-	cd $(ROOT) && rm -rf node_modules staticfiles wger/core/static/bootstrap-compiled.css wger/core/static/bootstrap-compiled.css.map
+	cd "$(ROOT)" && rm -rf node_modules staticfiles wger/core/static/bootstrap-compiled.css wger/core/static/bootstrap-compiled.css.map
