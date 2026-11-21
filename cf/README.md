@@ -1,88 +1,106 @@
-# cf-wger
+# wger auf Cloud Foundry
 
-Portierung von [wger](https://github.com/wger-project/wger) (Workout-, Ernährungs- und Gewichts-Tracker, Django/Python) auf **Cloud Foundry**. Die Anwendung soll mit den **Buildpacks** der Plattform gebaut und betrieben werden, statt als Docker-Container.
+Portierung von [wger](https://github.com/wger-project/wger) (Workout-,
+Ernährungs- und Gewichts-Tracker, Django) auf **Cloud Foundry** mit
+Buildpacks statt Docker-Image. Dieses Repo ist ein Abzweig von
+`wger-project/wger`; die Upstream-README liegt im Wurzelverzeichnis.
 
-> Status: Planung / Initialisierung. Alle Angaben unten sind Arbeitsannahmen und müssen im Projekt geprüft werden.
+> Stand 2026-11-21: läuft auf der lokalen Entwicklungsplattform
+> `cfk8s-platform` (echtes Cloud Foundry auf kind). Alles unten ist dort
+> gemessen, sofern nicht als „bitte prüfen" markiert.
 
-## Hintergrund
+## Was wo liegt
 
-wger wird upstream vor allem per Docker Compose betrieben. Wir wollen prüfen und umsetzen, ob die Anwendung auf unserer Cloud-Foundry-Plattform als reguläre CF-App laufen kann:
+| Datei | Zweck |
+|---|---|
+| `cf/settings.py` | Settings-Overlay: übersetzt `VCAP_SERVICES` in die Variablen, die `settings/main.py` liest, und importiert es danach |
+| `cf/storage.py` | whitenoise-Storage mit der Nachsicht von Upstream gegenüber fehlenden Source Maps |
+| `cf/manifest.yml` | drei Apps: `wger-web`, `wger-worker`, `wger-beat` |
+| `cf/Makefile` | Export, Asset-Build, Push, Initialisierung |
+| `cf/requirements.lock.txt` | `uv export` aus `uv.lock`, mit `gunicorn` aus der Gruppe `docker` |
+| `cf/requirements-cf.txt` | was CF zusätzlich braucht: `whitenoise` |
+| `requirements.txt`, `runtime.txt`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil der Buildpack sie dort sucht |
 
-- Build und Laufzeit über **Buildpacks** (kein eigenes Image)
-- Betrieb auf dem Root-Filesystem der Plattform (z. B. `cflinuxfs4`). Stemcells sind BOSH-VM-Images der Plattformebene und werden vom Plattformbetreiber gepflegt, die App nutzt sie nicht direkt.
-- Anbindung an Marketplace-Services statt lokaler Container
+Upstream-Dateien sind nicht verändert; `.gitignore` hat vier Zeilen für
+erzeugte Dateien bekommen.
 
-Das Repo ist ein Fork/Abzweig von `wger-project/wger`. Ziel ist, Upstream-Code möglichst wenig zu ändern, damit sich Updates weiter einspielen lassen.
+## Dienste
 
-## Ziele
-
-1. Lauffähige wger-Instanz in einem CF-Test-Space
-2. Reproduzierbarer Deploy per `cf push` mit `manifest.yml`
-3. Konfiguration ausschließlich über Umgebungsvariablen und Service-Bindings (`VCAP_SERVICES`)
-4. Dokumentierter Betrieb (Migrationen, Worker, Betrieb, Updates)
-
-## Nicht-Ziele
-
-- Änderungen an der Fachlogik von wger
-- Produktivbetrieb vor erfolgreichem Test (Sicherheit, Datenschutz, Betrieb sind separat zu klären)
-
-## Geplante Architektur
-
-| Komponente | Zweck | Umsetzung auf CF |
+| Dienst | Instanz | Bindung in `cf/settings.py` |
 |---|---|---|
-| `wger-web` | Django-Anwendung | App mit gunicorn |
-| `wger-worker` | Hintergrundjobs (Celery) | eigene App oder zusätzlicher Prozesstyp |
-| `wger-beat` | geplante Tasks (optional) | eigene App, nur falls benötigt |
-| Flower | Celery-Monitoring (optional) | nur zum Debuggen |
+| PostgreSQL (`cnpg-postgresql`, Plan `small`) | `wger-db` | Tag `postgresql`; Host aus `fqdn-uri`, weil `host` dort ein kurzer Service-Name ohne Namespace ist |
+| RabbitMQ (`rabbitmq-cluster`, Plan `dev`) | `wger-mq` | Tag `amqp`; Celery-Broker, Ergebnis-Backend `rpc://` |
+| benutzerdefiniert | `wger-secrets` | Name; `secret_key`, optional `jwt_public_key`, `jwt_private_key`, `email_host_user`, `email_host_password` |
+| Redis (Tag `redis` oder `valkey`) | – | wenn gebunden: Cache, Sessions, Celery-Broker. Lokal nicht vorhanden |
+| S3 (Tag `s3`) | – | wenn gebunden: Media-Uploads. Lokal nicht vorhanden; **bitte prüfen**, die Schlüsselnamen der Credentials sind geraten |
 
-## Benötigte Services
+**Ohne Redis** liegen Cache, Sessions (`cached_db`) und die Login-Sperren
+von django-axes in der Datenbanktabelle `wger_cache`. **Ohne S3** landen
+Uploads im flüchtigen Dateisystem und sind nach einem Neustart weg.
 
-Aus den Abhängigkeiten abgeleitet, noch nicht gegen die Settings geprüft:
+## Erster Start
 
-| Service | Verwendung | Status |
-|---|---|---|
-| PostgreSQL | Hauptdatenbank | Pflicht |
-| Redis | Celery-Broker, Cache | Pflicht |
-| S3-kompatibler Object Storage | Uploads, z. B. Fortschrittsfotos (CF-Dateisystem ist flüchtig) | Pflicht |
-| SMTP/Mail | Registrierung, Passwort-Reset | optional |
-| Monitoring/Logging | Prometheus-Endpoint ist vorhanden | optional |
+Vorher: `cf target` auf den Ziel-Space, `python_buildpack` vorhanden
+(`cf buildpacks`; auf `cfk8s-platform`: `make cf-buildpack-python`).
 
-**Verfügbare Services in unserer Umgebung (CF Marketplace):** PostgreSQL, Redis, S3.
-Mail/SMTP: _noch zu klären_. Konkrete Service-Pläne, Namen und Versionen: _noch zu ergänzen_.
+```
+cf create-service cnpg-postgresql small wger-db
+cf create-service rabbitmq-cluster dev wger-mq
+make -f cf/Makefile secrets      # wger-secrets mit zufaelligem SECRET_KEY
+make -f cf/Makefile assets       # node_modules/ (38 MB) und bootstrap-compiled.css
+make -f cf/Makefile push-web     # nur wger-web; Staging mit collectstatic
+make -f cf/Makefile init         # Migrationen, Fixtures, admin, Cache-Tabelle, Site-URL
+make -f cf/Makefile push         # alle drei Apps
+```
 
-## Bekannte Aufgaben / Anpassungen
+`init` legt den Benutzer `admin` mit dem Passwort `adminadmin` an (Upstream-
+Verhalten von `wger bootstrap`). **Danach ändern.**
 
-- [ ] Abhängigkeiten: `uv.lock` nach `requirements.txt` exportieren (oder Buildpack-Unterstützung für uv prüfen)
-- [ ] Python- und Node-Versionen gegen die installierten Buildpacks prüfen (`cf buildpacks`)
-- [ ] Frontend-Assets: in der CI vorbauen oder Multi-Buildpack (`nodejs_buildpack` + `python_buildpack`)
-- [ ] Settings-Overlay: `VCAP_SERVICES` auf `DATABASE_URL`, Redis-URL und Storage-Konfiguration abbilden
-- [ ] Static-Files: Auslieferung klären (z. B. `whitenoise` oder Object Storage)
-- [ ] Media-Uploads auf S3 umstellen (`django-storages`)
-- [ ] `manifest.yml` mit Prozesstypen und Service-Bindings
-- [ ] Migrationen und Initialdaten per `cf run-task` ausführen
-- [ ] Healthcheck konfigurieren
-- [ ] Betrieb dokumentieren
+## Was gemessen ist
 
-## Vorgehen
+- Staging mit `python_buildpack` 1.9.4, Python 3.13.15, `collectstatic` beim
+  Staging: 11 421 Dateien, Droplet 1,5 GB von 2 GB Platte. Der Löwenanteil
+  ist `fontawesomefree` (272 MB), das Upstream als pip-Paket mitbringt.
+- Healthcheck `http` auf `/api/v2/version/`: antwortet ohne Anmeldung mit 200
+  und der Version, ohne Datenbank.
+- Statische Dateien mit Hash-Namen aus whitenoise: 200, richtiger Content-Type.
+- `init` als Task braucht 2 GB Speicher und 2 GB Platte: mit dem Standard
+  (1 GB) starb die Migration `nutrition.0014` mit Exit 137, und mehr als 2 GB
+  Platte lässt die Plattform nicht zu.
+- Login über die Route: `POST /en/user/login` antwortet 302, Session-Cookie
+  gesetzt, Dashboard zeigt den Benutzer. CSRF hinter dem Gorouter funktioniert,
+  `X-Forwarded-Proto` wird ausgewertet.
+- Worker: verbindet sich mit dem RabbitMQ-Broker und meldet `ready`. Ein per
+  `celery --app wger call` abgeschickter Task wurde im Worker empfangen und
+  als `succeeded` protokolliert. Beat startet mit `PersistentScheduler` auf
+  `/tmp/celerybeat-schedule`.
 
-1. Settings und Umgebungsvariablen von wger analysieren
-2. Minimalen Test-Push ohne Worker durchführen
-3. Services binden, Migrationen ausführen
-4. Worker und Storage ergänzen
-5. Test, Doku, ggf. Übergabe an den Betrieb
+## Betrieb
 
-## Repository-Konventionen
+| Aufgabe | Befehl |
+|---|---|
+| Logs | `cf logs wger-web --recent` (alle Prozesse loggen auf stdout) |
+| Migration nach einem Update | `make -f cf/Makefile init` (idempotent; `bootstrap` migriert nur, Fixtures lädt es nur bei leerer DB) |
+| Übungsdaten nachladen | `cf run-task wger-web -m 2G -k 2G --command "python manage.py sync-exercises"` (braucht ausgehendes Internet) |
+| Zutaten nachladen | `cf run-task wger-web -m 2G -k 2G --command "python -m wger load-online-fixtures"` |
+| JWT-Schlüssel | `cf run-task wger-web --command "python manage.py generate-jwt-keys"`, Ausgabe nach `wger-secrets` (`cf update-user-provided-service`) |
+| Abhängigkeiten nach Upstream-Merge | `make -f cf/Makefile export`, dann `assets`, dann `push` |
 
-- Arbeitsbranch: `cf-port`
-- Änderungen an Upstream-Dateien minimal halten, CF-spezifische Dateien möglichst separat ablegen (z. B. `cf/`)
-- Remote `upstream` zeigt auf `wger-project/wger`, Updates per Merge
-- **Keine** Zugangsdaten, internen Vorgangsnummern, konkreten Einsatzorte/-zeiten oder klassifizierten Informationen ins Repo oder in Prompts. Beispiele und Konfigurationen anonymisieren.
+Die Route ist lokal nur per HTTP erreichbar; `WGER_SITE_SCHEME: http` im
+Manifest sagt das der App. Auf einer Plattform mit TLS-Terminierung entfällt
+die Zeile.
 
-## Lizenz
+## Offen
 
-wger steht unter **AGPL-3.0-or-later**. Eigene Änderungen unterliegen derselben Lizenz. Wird die Anwendung Dritten über ein Netzwerk angeboten, müssen die geänderten Quellen bereitgestellt werden. Vor einem Einsatz über den internen Test hinaus bitte intern klären.
-
-## Links
-
-- Upstream: https://github.com/wger-project/wger
-- Dokumentation: https://wger.readthedocs.io
+- **Beat** läuft, aber ob eine geplante Aufgabe zu ihrer Zeit auch ausgeführt
+  wird, ist erst nach einem Tag Laufzeit messbar.
+- **S3**: kein Angebot auf der lokalen Plattform. Der Zweig in
+  `cf/settings.py` ist ungetestet.
+- **E-Mail**: Upstream braucht `ENABLE_EMAIL` plus SMTP-Variablen; lokal gibt
+  es keinen SMTP-Dienst. Die Zugangsdaten gehören nach `wger-secrets`.
+- **Prometheus**: `EXPOSE_PROMETHEUS_METRICS=True` schaltet `/prometheus/metrics`
+  frei, unauthentifiziert und pro Prozess. Vor dem Einschalten klären.
+- **Plattenplatz**: 1,5 GB Droplet bei 2 GB Quote. Wächst `fontawesomefree`
+  oder `node_modules`, scheitert das Staging an der Platte.
+- Lizenz: wger steht unter **AGPL-3.0-or-later**; wer die Anwendung Dritten
+  über ein Netz anbietet, muss die geänderten Quellen bereitstellen.
