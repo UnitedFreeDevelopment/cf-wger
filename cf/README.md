@@ -1,9 +1,18 @@
 # wger auf Cloud Foundry
 
+> **Dies ist ein Fork, kein eigenständiges Projekt.** Das Original ist
+> [wger-project/wger](https://github.com/wger-project/wger) (AGPL-3.0-or-later).
+> Dieses Repo ändert an der Anwendung nichts. Es ist eine **Optimierung für
+> Cloud Foundry**: Settings-Overlay, Manifest, Build- und Betriebsskripte
+> liegen unter `cf/`, damit wger dort als reguläre Buildpack-App läuft.
+> Funktionen, Fehler und Weiterentwicklung der Anwendung gehören ins Original;
+> der Branch `cf-port` lässt sich mit dem `master` des Originals zusammenführen
+> (Remote `upstream`).
+
 Portierung von [wger](https://github.com/wger-project/wger) (Workout-,
 Ernährungs- und Gewichts-Tracker, Django) auf **Cloud Foundry** mit
-Buildpacks statt Docker-Image. Dieses Repo ist ein Abzweig von
-`wger-project/wger`; die Upstream-README liegt im Wurzelverzeichnis.
+Buildpacks statt Docker-Image. Die Upstream-README liegt im
+Wurzelverzeichnis.
 
 > Stand 2026-11-21: läuft auf der lokalen Entwicklungsplattform
 > `cfk8s-platform` (echtes Cloud Foundry auf kind). Alles unten ist dort
@@ -21,8 +30,8 @@ Buildpacks statt Docker-Image. Dieses Repo ist ein Abzweig von
 | `cf/requirements-cf.txt` | was CF zusätzlich braucht: `whitenoise` |
 | `requirements.txt`, `.python-version`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil Buildpacks sie dort suchen. `.python-version` liest der Heroku-CNB, Paketo nimmt `BP_CPYTHON_VERSION` aus dem Manifest |
 
-Upstream-Dateien sind nicht verändert; `.gitignore` hat vier Zeilen für
-erzeugte Dateien bekommen.
+Upstream-Code ist nicht verändert; `.gitignore` hat vier Zeilen für
+erzeugte Dateien bekommen, die Wurzel-`README.md` einen Fork-Hinweis am Anfang.
 
 ## Dienste
 
