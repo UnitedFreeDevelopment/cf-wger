@@ -175,5 +175,9 @@ laufen alte und neue Version gleichzeitig gegen dieselbe Datenbank.
   Buildpack tauschen, `.python-version` liegt schon bereit, dann messen.
 - **Größe im Container**: 1,1 GB bei 2 GB Quote. Unter 800 MB geht es nur
   mit einer Upstream-Änderung an `lingua` (306 MB).
+- **Zielplattform**: dort ist beim Staging kein PyPI erreichbar und kein
+  anonymer Docker-Pull möglich, also weder `pip` beim klassischen Buildpack
+  noch das Paketo-Image des Lifecycle `cnb`. Was darüber bekannt ist, steht
+  in `CLAUDE.md` unter „Zielplattform"; gemessen ist davon nichts.
 - Lizenz: wger steht unter **AGPL-3.0-or-later**; wer die Anwendung Dritten
   über ein Netz anbietet, muss die geänderten Quellen bereitstellen.

@@ -18,6 +18,12 @@ Zielplattform (Annahme, noch nicht gemessen):
 - S3 (S3-kompatibel)
 - Mail/SMTP: ungeklärt
 
+Was sonst über die Zielplattform bekannt ist, stammt aus Gesprächen, nicht aus Messungen in diesem Repo (Stand 2026-11-22, **bitte prüfen**):
+- Beim Staging ist kein PyPI-Index erreichbar; das npm-Gegenstück (Mirror) funktioniert. Ein PyPI-Mirror ist beim Plattformteam beantragt. Bis dahin bliebe nur Vendoring (`pip download --only-binary=:all:` nach `vendor/`, der klassische `python_buildpack` installiert von dort), nicht getestet.
+- Der klassische `python_buildpack` meldet dort beim Detect `python: command not found`. Die genannte Version 1.8.122 passt zu keinem Tag des Upstreams `cloudfoundry/python-buildpack` (die 1.8-Reihe endet bei 1.8.43, danach 1.9.x, geprüft 2026-11-22), und `bin/detect` des Upstreams ruft kein `python` auf: es prüft nur, ob `requirements.txt`, `setup.py`, `environment.yml` oder `Pipfile` existiert. Version und Herkunft der Meldung sind offen; erst `cf buildpacks` dort ablesen.
+- Anonymer Docker-Pull von Standard-Images ist gesperrt. Das trifft den Lifecycle `cnb` in `cf/manifest.yml`: `docker://docker.io/paketobuildpacks/python` würde dort nicht laden. Ohne Registry-Zugang bleibt der klassische `python_buildpack` mit `runtime.txt`.
+- glibc von `cflinuxfs4` ist 2.35 (Ubuntu 22.04; gemessen 2026-11-22 am Image `cloudfoundry/cflinuxfs4`). Wheels bis `manylinux_2_34` laufen damit; die Angabe 2.26 aus einer früheren Problemliste war falsch.
+
 Lokale Entwicklungsplattform `cfk8s-platform` (gemessen am 2026-11-21, `cf marketplace`):
 - `cnpg-postgresql` (PostgreSQL, CloudNativePG) – wird genutzt
 - `rabbitmq-cluster` – ersetzt Redis als Celery-Broker
@@ -27,15 +33,14 @@ Lokale Entwicklungsplattform `cfk8s-platform` (gemessen am 2026-11-21, `cf marke
 
 Zugangsdaten kommen ausschließlich über Service-Bindings (`VCAP_SERVICES`), nie hartcodiert. Der `SECRET_KEY` liegt im benutzerdefinierten Dienst `wger-secrets`.
 
-## Aufgaben (Reihenfolge)
-1. `settings/` und Umgebungsvariablen analysieren, Liste der benötigten Variablen erstellen.
-2. `uv export` nach `requirements.txt` (alternativ Buildpack-Unterstützung für uv prüfen). Python-/Node-Version gegen `cf buildpacks` abgleichen.
-3. Settings-Overlay: `VCAP_SERVICES` auf Datenbank, Redis (Celery-Broker, Cache) und S3 (`django-storages`, `boto3`) abbilden.
-4. Static-Files-Auslieferung klären (z. B. `whitenoise` ergänzen oder S3). Frontend-Assets (`package.json`) in der CI vorbauen oder per Multi-Buildpack (`nodejs_buildpack` + `python_buildpack`).
-5. `manifest.yml`: `wger-web` (gunicorn), `wger-worker` (Celery), optional `wger-beat`. Healthcheck und Service-Bindings setzen.
-6. Migrationen und Initialdaten per `cf run-task`, nicht beim App-Start.
-7. Ersten Test-Push zuerst ohne Worker, dann Worker und Storage ergänzen.
-8. Betrieb in der README dokumentieren.
+## Stand und offene Punkte
+
+Der Stand steht in `cf/README.md` (Dienste, erster Start, Messungen, Betrieb). Was gilt:
+- `cf/settings.py` übersetzt `VCAP_SERVICES` in die Variablen von `settings/main.py`; `cf/requirements.lock.txt` kommt aus `uv export`.
+- Static-Files liefert whitenoise aus `staticfiles/`, das `make -f cf/Makefile assets` lokal vorbaut; ein `nodejs_buildpack` ist deshalb nicht nötig.
+- `cf/manifest.yml` führt `wger-web`, `wger-worker`, `wger-beat` mit Healthcheck und Bindungen; Migrationen laufen als Task (`make -f cf/Makefile init`).
+
+Offen: S3-Zweig ungetestet, E-Mail ungeklärt, Beat nur kurz beobachtet, Heroku-CNB als Größenhebel nicht gemessen, und alles unter „Zielplattform" oben. Einzelheiten in `cf/README.md`, Abschnitt „Offen".
 
 ## Ressourcen beim Start (gemessen 2026-11-21, cfk8s-platform)
 
@@ -56,4 +61,3 @@ Platte unter 2G geht nicht: das Droplet belegt 1,1 GB, davon 306 MB `lingua`, 37
 ## Hinweise
 - Das CF-Dateisystem ist flüchtig: keine lokalen Uploads.
 - Stemcells sind BOSH-Plattformebene, für die App nicht relevant. Die App läuft auf dem Root-Filesystem der Plattform (z. B. `cflinuxfs4`).
-- Die Annahmen in diesem Dokument stammen aus den Abhängigkeiten (`pyproject.toml`), die Settings wurden noch nicht gelesen.
