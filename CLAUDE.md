@@ -12,7 +12,7 @@ wger (Django, Python >= 3.12) soll als reguläre Cloud-Foundry-App mit Buildpack
 - Lizenz AGPL-3.0-or-later beachten.
 
 ## Verfügbare CF-Services
-Zielplattform (Annahme, noch nicht gemessen):
+Zielplattformen: zwei, einmal TAS (Tanzu Application Service) und einmal Vanilla-Cloud-Foundry (cf-deployment). Buildpack-Versionen, Stacks und ob der Lifecycle `cnb` geht, können sich unterscheiden und sind je Plattform mit `cf buildpacks`, `cf stacks` und einem Probe-Push mit `--lifecycle cnb` abzulesen. Für beide angenommen, noch nicht gemessen:
 - PostgreSQL
 - Redis
 - S3 (S3-kompatibel)
