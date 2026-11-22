@@ -5,8 +5,13 @@ SHELL := /bin/bash
 # CURDIR statt $(dir ...): make zerlegt Pfade mit Leerzeichen, und das
 # Arbeitsverzeichnis hat eines. Deshalb der Aufruf aus dem Wurzelverzeichnis.
 ROOT  := $(CURDIR)
+# Welche Vars-Datei das Manifest bekommt: cnb (Paketo, Vorgabe, gemessen auf
+# cfk8s) oder buildpack (klassischer python_buildpack, fuer Plattformen ohne
+# Registry-Zugang). Begruendung in cf/manifest.yml.
+VARIANT ?= cnb
+PUSH   = cf push -f cf/manifest.yml --vars-file cf/vars.$(VARIANT).yml
 
-.PHONY: help export assets secrets push-web push init logs clean
+.PHONY: help export assets vendor secrets push-web push init logs clean
 
 help:
 	@grep -E '^## ' $(lastword $(MAKEFILE_LIST)) | sed 's/^## /  /'
@@ -48,6 +53,26 @@ assets:
 	  2>&1 | grep -v "Can't find name" | tail -1
 	@cd "$(ROOT)" && du -sh staticfiles node_modules | sed 's/^/   /'
 
+## vendor: Wheels fuer den klassischen Buildpack nach vendor/ laden (nur VARIANT=buildpack)
+vendor:
+	@# Fuer Plattformen, deren Staging PyPI nicht erreicht. Liegt vendor/ im
+	@# Push, installiert der python_buildpack mit --no-index --find-links
+	@# daraus (src/python/supply/supply.go, RunPipVendored) und laedt nichts
+	@# nach. Geladen wird hier auf dem Entwicklungsrechner, deshalb muessen
+	@# Plattform und Python-Version ausdruecklich die des Containers sein:
+	@# cflinuxfs4 ist x86_64 mit glibc 2.35 (gemessen), also manylinux bis
+	@# _2_34; CPython 3.13 wie in runtime.txt. --only-binary=:all: lehnt
+	@# Quellpakete ab - die braeuchten beim Staging Build-Werkzeuge von PyPI.
+	@# Fehlt ein Wheel, bricht der Lauf ab und nennt das Paket.
+	cd "$(ROOT)" && rm -rf vendor && python3 -m pip download -q \
+	  -r cf/requirements.lock.txt -r cf/requirements-cf.txt -d vendor \
+	  --only-binary=:all: --python-version 3.13 --implementation cp \
+	  --abi cp313 --abi abi3 --abi none \
+	  --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 \
+	  --platform manylinux_2_28_x86_64 --platform manylinux_2_34_x86_64 \
+	  --platform linux_x86_64
+	@cd "$(ROOT)" && echo "   $$(ls vendor | wc -l) Wheels, $$(du -sh vendor | cut -f1)"
+
 ## secrets: benutzerdefinierten Dienst wger-secrets mit zufaelligem SECRET_KEY anlegen
 secrets:
 	@# Der Schluessel wird nirgends ausgegeben. Existiert der Dienst schon,
@@ -58,7 +83,7 @@ secrets:
 
 ## push-web: nur wger-web (erster Push, vor init)
 push-web:
-	cd "$(ROOT)" && cf push wger-web -f cf/manifest.yml
+	cd "$(ROOT)" && $(PUSH) wger-web
 
 ## push: alle drei Apps, nacheinander
 push:
@@ -66,7 +91,7 @@ push:
 	@# alle drei parallel, und Beat lief dabei in den Staging-Timeout der
 	@# Plattform (15 Minuten; gemessen 2026-11-21). Allein braucht jede App mit
 	@# dem Build-Cache der vorigen rund drei Minuten.
-	cd "$(ROOT)" && for app in wger-web wger-worker wger-beat; do cf push $$app -f cf/manifest.yml || exit 1; done
+	cd "$(ROOT)" && for app in wger-web wger-worker wger-beat; do $(PUSH) $$app || exit 1; done
 
 ## init: Migrationen, Fixtures, Admin, Cache-Tabelle, Site-URL - als Task, nicht beim Start
 init:
@@ -85,4 +110,4 @@ logs:
 
 ## clean: Bauartefakte entfernen
 clean:
-	cd "$(ROOT)" && rm -rf node_modules staticfiles wger/core/static/bootstrap-compiled.css wger/core/static/bootstrap-compiled.css.map
+	cd "$(ROOT)" && rm -rf node_modules staticfiles vendor wger/core/static/bootstrap-compiled.css wger/core/static/bootstrap-compiled.css.map

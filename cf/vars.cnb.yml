@@ -1,0 +1,5 @@
+# Variante cnb: Cloud Native Buildpacks, Paketo python von Docker Hub.
+# Braucht eine Plattform mit Lifecycle cnb, Registry-Zugang und 8 GB
+# Staging-Platte (cf/README.md). Aufruf: make -f cf/Makefile push VARIANT=cnb
+lifecycle: cnb
+buildpack: docker://docker.io/paketobuildpacks/python

@@ -99,3 +99,6 @@ wger/core/static/bootstrap-compiled.css
 wger/core/static/bootstrap-compiled.css.map
 staticfiles/
 media/
+
+# Cloud Foundry (cf/): erzeugt von `make -f cf/Makefile vendor`, nur fuer den klassischen Buildpack
+vendor/

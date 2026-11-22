@@ -24,11 +24,12 @@ Wurzelverzeichnis.
 |---|---|
 | `cf/settings.py` | Settings-Overlay: übersetzt `VCAP_SERVICES` in die Variablen, die `settings/main.py` liest, und importiert es danach |
 | `cf/storage.py` | whitenoise-Storage mit der Nachsicht von Upstream gegenüber fehlenden Source Maps |
-| `cf/manifest.yml` | drei Apps: `wger-web`, `wger-worker`, `wger-beat`, Lifecycle `cnb` mit `paketobuildpacks/python` |
-| `cf/Makefile` | Export, Asset-Build mit `collectstatic`, Push, Initialisierung |
+| `cf/manifest.yml` | drei Apps: `wger-web`, `wger-worker`, `wger-beat`; Lifecycle und Buildpack als Variablen |
+| `cf/vars.cnb.yml`, `cf/vars.buildpack.yml` | die zwei Bauweisen: Paketo über `cnb` (Vorgabe) oder klassischer `python_buildpack`; `VARIANT=` im Makefile wählt |
+| `cf/Makefile` | Export, Asset-Build mit `collectstatic`, Vendoring, Push, Initialisierung |
 | `cf/requirements.lock.txt` | `uv export` aus `uv.lock`, mit `gunicorn` aus der Gruppe `docker` |
 | `cf/requirements-cf.txt` | was CF zusätzlich braucht: `whitenoise` |
-| `requirements.txt`, `.python-version`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil Buildpacks sie dort suchen. `.python-version` liest der Heroku-CNB, Paketo nimmt `BP_CPYTHON_VERSION` aus dem Manifest |
+| `requirements.txt`, `runtime.txt`, `.python-version`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil Buildpacks sie dort suchen. `runtime.txt` liest der klassische `python_buildpack`, `.python-version` der Heroku-CNB, Paketo nimmt `BP_CPYTHON_VERSION` aus dem Manifest |
 
 Upstream-Code ist nicht verändert; `.gitignore` hat vier Zeilen für
 erzeugte Dateien bekommen. Die Wurzel-`README.md` gehört Upstream und bleibt
@@ -50,13 +51,14 @@ Uploads im flüchtigen Dateisystem und sind nach einem Neustart weg.
 
 ## Erster Start
 
-Vorher: `cf target` auf den Ziel-Space. Die Plattform muss den Lifecycle
-`cnb` können (`cf push --lifecycle cnb`) und beim Staging mindestens 8 GB
+Vorher: `cf target` auf den Ziel-Space. Mit der Vorgabe `VARIANT=cnb` muss
+die Plattform den Lifecycle `cnb` können (`cf push --lifecycle cnb`), das
+Paketo-Image von Docker Hub laden dürfen und beim Staging mindestens 8 GB
 flüchtigen Speicher geben: Der CNB-Export legt Layer, Cache-Kopie und beide
 Archive gleichzeitig unter `/tmp` ab, bei 4 GB räumt Kubernetes den
-Staging-Pod (auf `cfk8s-platform`: `make cf-staging-disk`). Der klassische
-`python_buildpack` geht weiterhin: `lifecycle: cnb` und `buildpacks` im
-Manifest ersetzen, `runtime.txt` mit `python-3.13.x` anlegen.
+Staging-Pod (auf `cfk8s-platform`: `make cf-staging-disk`). Kann die
+Plattform das nicht, nimmt `VARIANT=buildpack` den klassischen
+`python_buildpack`; siehe „Auf eine andere Plattform" unten.
 
 ```
 cf create-service cnpg-postgresql small wger-db
@@ -155,6 +157,56 @@ laufen alte und neue Version gleichzeitig gegen dieselbe Datenbank.
   ist für Beat belanglos.
 - `wger-worker` kann rollend, der Warm Shutdown ist gemessen.
 
+## Auf eine andere Plattform
+
+Für TAS und Vanilla-Cloud-Foundry gilt dasselbe Repo; was sich unterscheidet,
+ist die Bauweise und woher Python und die Pakete kommen. Der Weg in fünf
+Schritten, die ersten drei je Plattform:
+
+1. **Messen, was die Plattform kann.** `cf stacks` (es muss `cflinuxfs4`
+   geben), `cf buildpacks` (Name und Version des Python-Buildpacks),
+   `cf marketplace` (PostgreSQL, Redis, S3, Mail), und ein Probe-Push einer
+   kleinen App mit `--lifecycle cnb`. Dazu einmal `cf push` von wger mit
+   `VARIANT=buildpack` ohne `vendor/`: ob das Staging PyPI erreicht, steht
+   dann im Log unter „Running Pip Install (Unvendored)".
+2. **Bauweise wählen.** Lädt das Paketo-Image und geht `cnb`: Vorgabe
+   `VARIANT=cnb`, alles wie unter „Erster Start". Sonst
+   `VARIANT=buildpack`; dafür muss das Python-Buildpack der Plattform
+   CPython 3.13 anbieten (die Versionen stehen in seiner `manifest.yml`,
+   bei einem **cached**/offline-Buildpack liegen sie bei, sonst lädt er sie
+   von `buildpacks.cloudfoundry.org`; `runtime.txt` sagt `python-3.13.x`).
+   Bietet er kein 3.13: `runtime.txt` und `.python-version` auf die
+   höchste angebotene Version ab 3.12 setzen, Upstream verlangt
+   `>= 3.12`.
+3. **Pakete beschaffen.** Erreicht das Staging PyPI oder einen Mirror:
+   nichts zu tun, bei einem Mirror `--index-url` als erste Zeile in
+   `requirements.txt` (den Buildpack liest sie aus und reicht sie an pip
+   weiter; `cf/settings.py` ist davon unberührt). Erreicht es keinen Index:
+   `make -f cf/Makefile vendor` lädt die Wheels auf den Entwicklungsrechner
+   nach `vendor/`, und der klassische Buildpack installiert daraus mit
+   `--no-index`, ohne jeden Netzzugriff (belegt im Quelltext des Buildpacks,
+   `RunPipVendored`). Gemessen 2026-11-22 mit pip 24.0: alle 100 Pakete des
+   Lockfiles, die unter Linux gebraucht werden, gibt es als Wheel für
+   CPython 3.13 und manylinux (`colorama` ist nur für Windows markiert und
+   fällt weg), zusammen 250 MB, davon 170 MB `lingua`. `vendor/` kommt mit
+   in den Push und ins Droplet; die Plattenquote von 2G bleibt deshalb
+   knapp, **bitte prüfen**.
+4. **Dienste binden.** Instanzen `wger-db`, `wger-mq` oder ein Redis,
+   `wger-secrets` wie unter „Dienste". Mit einer Redis-Bindung (Tag `redis`
+   oder `valkey`) nimmt `cf/settings.py` Redis für Cache, Sessions und
+   Celery-Broker, dann entfällt RabbitMQ; mit einer S3-Bindung (Tag `s3`)
+   gehen Uploads nach S3. Beide Zweige sind lokal nicht messbar und dort
+   als Erstes zu prüfen, die S3-Schlüsselnamen sind geraten. Terminiert die
+   Plattform TLS, die Zeilen `WGER_SITE_SCHEME: http` im Manifest entfernen.
+5. **Wie unter „Erster Start"**: `secrets`, `assets`, `push-web`, `init`,
+   `push`, alle mit `VARIANT=buildpack`, falls so gewählt.
+
+Nicht gemessen, **bitte prüfen**: ein Push mit `vendor/` auf dem klassischen
+Buildpack und die Variablen `((lifecycle))`, `((buildpack))` im Manifest.
+Die lokale Plattform war beim Schreiben nicht erreichbar; die Gegenprobe ist
+`make -f cf/Makefile push-web VARIANT=buildpack` auf `cfk8s` mit `vendor/`,
+und im Staging-Log muss „Running Pip Install (Vendored)" stehen.
+
 ## Offen
 
 - **Staging-Zeit**: Beim gemeinsamen Push aller drei Apps lief Beat in den
@@ -175,9 +227,9 @@ laufen alte und neue Version gleichzeitig gegen dieselbe Datenbank.
   Buildpack tauschen, `.python-version` liegt schon bereit, dann messen.
 - **Größe im Container**: 1,1 GB bei 2 GB Quote. Unter 800 MB geht es nur
   mit einer Upstream-Änderung an `lingua` (306 MB).
-- **Zielplattform**: dort ist beim Staging kein PyPI erreichbar und kein
-  anonymer Docker-Pull möglich, also weder `pip` beim klassischen Buildpack
-  noch das Paketo-Image des Lifecycle `cnb`. Was darüber bekannt ist, steht
-  in `CLAUDE.md` unter „Zielplattform"; gemessen ist davon nichts.
+- **Zielplattformen** (TAS und Vanilla-CF): dort ist nach bisherigem Stand
+  beim Staging kein PyPI erreichbar und kein anonymer Docker-Pull möglich.
+  Der Weg dafür steht unter „Auf eine andere Plattform", der Kenntnisstand
+  in `CLAUDE.md` unter „Zielplattformen"; gemessen ist dort nichts.
 - Lizenz: wger steht unter **AGPL-3.0-or-later**; wer die Anwendung Dritten
   über ein Netz anbietet, muss die geänderten Quellen bereitstellen.

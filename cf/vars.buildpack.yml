@@ -1,0 +1,7 @@
+# Variante buildpack: der klassische python_buildpack der Plattform. Python-
+# Version aus runtime.txt im Wurzelverzeichnis; Pakete aus vendor/ (ohne
+# Index, make -f cf/Makefile vendor) oder von PyPI bzw. einem Mirror
+# (--index-url in requirements.txt). Fuer Plattformen ohne Registry-Zugang
+# fuer das Paketo-Image. Aufruf: make -f cf/Makefile push VARIANT=buildpack
+lifecycle: buildpack
+buildpack: python_buildpack

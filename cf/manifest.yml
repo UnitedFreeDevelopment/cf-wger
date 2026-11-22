@@ -1,10 +1,14 @@
 # Drei Apps aus einem Quellbaum: web, worker, beat. `path: ..` zeigt auf das
 # Wurzelverzeichnis, der Aufruf lautet `cf push -f cf/manifest.yml`.
 #
-# Lifecycle cnb: Cloud Native Buildpacks (Paketo python) statt des klassischen
-# python_buildpack. Paketo kennt keinen Django-Hook, deshalb liegt
-# staticfiles/ vorgebaut im Push (make -f cf/Makefile assets). Die Python-
-# Version kommt aus BP_CPYTHON_VERSION, nicht aus runtime.txt.
+# Lifecycle und Buildpack kommen aus einer Vars-Datei (cf/vars.cnb.yml oder
+# cf/vars.buildpack.yml, Aufruf ueber `make -f cf/Makefile push VARIANT=...`),
+# weil nicht jede Plattform beides kann: cnb braucht Registry-Zugang fuer das
+# Paketo-Image, der klassische python_buildpack braucht PyPI, einen Mirror oder
+# vendor/. Alles andere ist fuer beide gleich. staticfiles/ liegt vorgebaut im
+# Push (make -f cf/Makefile assets), weil Paketo keinen Django-Hook kennt. Die
+# Python-Version: BP_CPYTHON_VERSION fuer Paketo, runtime.txt fuer den
+# klassischen Buildpack - beide auf 3.13 halten.
 #
 # Was hier NICHT steht: SECRET_KEY und andere Geheimnisse. Die kommen aus dem
 # benutzerdefinierten Dienst wger-secrets (cf/README.md).
@@ -19,9 +23,9 @@ applications:
     disk_quota: 2G
     instances: 1
     stack: cflinuxfs4
-    lifecycle: cnb
+    lifecycle: ((lifecycle))
     buildpacks:
-      - docker://docker.io/paketobuildpacks/python
+      - ((buildpack))
     # --preload wie im Docker-Entrypoint von Upstream. Worker-Zahl ueber
     # WEB_CONCURRENCY, weil 1G Speicher fuer zwei Django-Prozesse reicht,
     # fuer vier nicht.
@@ -51,9 +55,9 @@ applications:
     disk_quota: 2G
     instances: 1
     stack: cflinuxfs4
-    lifecycle: cnb
+    lifecycle: ((lifecycle))
     buildpacks:
-      - docker://docker.io/paketobuildpacks/python
+      - ((buildpack))
     no-route: true
     health-check-type: process
     # Wie extras/docker/production/celery/start-worker von Upstream.
@@ -75,9 +79,9 @@ applications:
     # Genau eine Instanz, sonst laufen die geplanten Aufgaben doppelt.
     instances: 1
     stack: cflinuxfs4
-    lifecycle: cnb
+    lifecycle: ((lifecycle))
     buildpacks:
-      - docker://docker.io/paketobuildpacks/python
+      - ((buildpack))
     no-route: true
     health-check-type: process
     # Die Schedule-Datei liegt im fluechtigen Dateisystem; Beat baut sie beim
