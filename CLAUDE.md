@@ -6,7 +6,7 @@ wger (Django, Python >= 3.12) soll als reguläre Cloud-Foundry-App mit Buildpack
 ## Regeln
 - Arbeitsbranch: `cf-port`. Nicht direkt auf `master` committen.
 - Upstream-Code möglichst nicht ändern. CF-spezifische Dateien in `cf/` oder als separates Settings-Overlay ablegen, damit Upstream-Merges einfach bleiben.
-- Die Projekt-README liegt unter `cf/README.md`. Die `README.md` im Wurzelverzeichnis gehört Upstream und bleibt unverändert, sonst kollidiert jeder Upstream-Merge an dieser Datei.
+- Die Projekt-README liegt unter `cf/README.md`. Die Schrittfolge für die Zielplattform steht in `cf/ANLEITUNG-ZIELPLATTFORM.md`. Die `README.md` im Wurzelverzeichnis gehört Upstream und bleibt unverändert, sonst kollidiert jeder Upstream-Merge an dieser Datei.
 - Keine Zugangsdaten, internen Vorgangsnummern, konkreten Einsatzorte/-zeiten oder klassifizierten Informationen ins Repo, in Commits oder Prompts. Beispiele anonymisieren.
 - Nichts raten: Wenn etwas unklar oder nicht verifiziert ist, im Code/der Doku als "bitte prüfen" markieren oder nachfragen.
 - Lizenz AGPL-3.0-or-later beachten.
