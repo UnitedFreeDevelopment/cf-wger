@@ -13,3 +13,7 @@ uv.lock
 package-lock.json
 media/
 *.sqlite3
+# Die Teile des lingua-Wheels (cf/wheels/, siehe cf/Makefile wheels): ins
+# Droplet gehoert nur das zusammengesetzte Wheel, sonst liegt es doppelt drin.
+cf/wheels/*.part-*
+cf/wheels/SHA256SUMS

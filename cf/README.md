@@ -26,9 +26,10 @@ Wurzelverzeichnis.
 | `cf/storage.py` | whitenoise-Storage mit der Nachsicht von Upstream gegenüber fehlenden Source Maps |
 | `cf/manifest.yml` | drei Apps: `wger-web`, `wger-worker`, `wger-beat`; Lifecycle und Buildpack als Variablen |
 | `cf/vars.cnb.yml`, `cf/vars.buildpack.yml` | die zwei Bauweisen: Paketo über `cnb` (Vorgabe) oder klassischer `python_buildpack`; `VARIANT=` im Makefile wählt |
-| `cf/Makefile` | Export, Asset-Build mit `collectstatic`, Vendoring, Push, Initialisierung |
+| `cf/Makefile` | Export, Asset-Build mit `collectstatic`, Wheels, Vendoring, Push, Initialisierung |
 | `cf/requirements.lock.txt` | `uv export` aus `uv.lock`, mit `gunicorn` aus der Gruppe `docker` |
 | `cf/requirements-cf.txt` | was CF zusätzlich braucht: `whitenoise` |
+| `cf/wheels/` | Wheels, die der Index der Zielplattform nicht führt: `psycopg-binary` und `lingua-language-detector` für CPython 3.13 auf `cflinuxfs4`. `requirements.txt` zeigt mit `--find-links` dorthin. Das lingua-Wheel (170 MB) liegt in Teilen zu 45 MB, weil GitHub keine Datei über 100 MB nimmt; `make -f cf/Makefile wheels` setzt es zusammen und prüft die Prüfsummen von PyPI (`SHA256SUMS`). `push` und `push-web` rufen das selbst auf |
 | `requirements.txt`, `runtime.txt`, `.python-version`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil Buildpacks sie dort suchen. `runtime.txt` liest der klassische `python_buildpack`, `.python-version` der Heroku-CNB, Paketo nimmt `BP_CPYTHON_VERSION` aus dem Manifest |
 
 Upstream-Code ist nicht verändert; `.gitignore` hat vier Zeilen für
@@ -181,7 +182,15 @@ Schritten, die ersten drei je Plattform:
 3. **Pakete beschaffen.** Erreicht das Staging PyPI oder einen Mirror:
    nichts zu tun, bei einem Mirror `--index-url` als erste Zeile in
    `requirements.txt` (den Buildpack liest sie aus und reicht sie an pip
-   weiter; `cf/settings.py` ist davon unberührt). Erreicht es keinen Index:
+   weiter; `cf/settings.py` ist davon unberührt). Fehlen dem Index einzelne
+   Wheels, liegen sie unter `cf/wheels/` im Repo; pip nimmt sie von dort und
+   den Rest vom Index (`--find-links` in `requirements.txt`). Zurzeit sind
+   das `psycopg-binary` 3.3.9 und `lingua-language-detector` 2.2.0, beide
+   für CPython 3.13 und manylinux x86_64; ein `py3-none-any`-Wheel gibt es
+   für lingua 2.2.0 auf PyPI nicht, alle 24 Dateien dort sind
+   plattformgebunden und je 170 MB (abgelesen 2026-11-23). Nach einem
+   Versionswechsel im Lockfile: `make -f cf/Makefile wheels-fetch`, dann
+   `git add cf/wheels`. Erreicht es keinen Index:
    `make -f cf/Makefile vendor` lädt die Wheels auf den Entwicklungsrechner
    nach `vendor/`, und der klassische Buildpack installiert daraus mit
    `--no-index`, ohne jeden Netzzugriff (belegt im Quelltext des Buildpacks,
@@ -202,10 +211,16 @@ Schritten, die ersten drei je Plattform:
    `push`, alle mit `VARIANT=buildpack`, falls so gewählt.
 
 Nicht gemessen, **bitte prüfen**: ein Push mit `vendor/` auf dem klassischen
-Buildpack und die Variablen `((lifecycle))`, `((buildpack))` im Manifest.
-Die lokale Plattform war beim Schreiben nicht erreichbar; die Gegenprobe ist
+Buildpack, die Variablen `((lifecycle))`, `((buildpack))` im Manifest, und
+ein Push mit `cf/wheels/` (beide Bauweisen). Die lokale Plattform war beim
+Schreiben nicht erreichbar (2026-11-22 und 2026-11-23). Die Gegenproben:
 `make -f cf/Makefile push-web VARIANT=buildpack` auf `cfk8s` mit `vendor/`,
-und im Staging-Log muss „Running Pip Install (Vendored)" stehen.
+im Staging-Log muss „Running Pip Install (Vendored)" stehen; und
+`make -f cf/Makefile push-web` ohne `vendor/`, danach `cf app wger-web`
+für die Plattengröße, erwartet rund 170 MB mehr durch das lingua-Wheel im
+App-Verzeichnis. Lokal gemessen ist nur, dass pip ohne Index beide Wheels
+aus `cf/wheels/` findet (CPython 3.13, manylinux_2_17 x86_64), und dass
+`make wheels` bei einem veränderten Teil abbricht.
 
 ## Offen
 
@@ -225,8 +240,10 @@ und im Staging-Log muss „Running Pip Install (Vendored)" stehen.
 - **Heroku-CNB als nächster Hebel**: `heroku/buildpack-python` braucht am
   Sample 290 MB weniger für Python als Paketo. Für wger: im Manifest den
   Buildpack tauschen, `.python-version` liegt schon bereit, dann messen.
-- **Größe im Container**: 1,1 GB bei 2 GB Quote. Unter 800 MB geht es nur
-  mit einer Upstream-Änderung an `lingua` (306 MB).
+- **Größe im Container**: 1,1 GB bei 2 GB Quote, gemessen vor `cf/wheels/`;
+  das lingua-Wheel kommt mit dem App-Verzeichnis ins Droplet, also rund
+  170 MB dazu, **bitte prüfen**. Unter 800 MB geht es nur mit einer
+  Upstream-Änderung an `lingua` (306 MB installiert).
 - **Zielplattformen** (TAS und Vanilla-CF): dort ist nach bisherigem Stand
   beim Staging kein PyPI erreichbar und kein anonymer Docker-Pull möglich.
   Der Weg dafür steht unter „Auf eine andere Plattform", der Kenntnisstand

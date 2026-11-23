@@ -3,3 +3,7 @@
 # damit hier nur der Verweis steht. Neu erzeugen: make -f cf/Makefile export
 -r cf/requirements.lock.txt
 -r cf/requirements-cf.txt
+# Zuerst in cf/wheels/ nachsehen, dann im Index: fuer Plattformen, deren Index
+# einzelne Wheels nicht fuehrt (psycopg-binary, lingua). pip loest den Pfad
+# relativ zu dieser Datei auf, wenn er dort existiert. Siehe cf/Makefile wheels.
+--find-links cf/wheels

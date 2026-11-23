@@ -11,7 +11,7 @@ ROOT  := $(CURDIR)
 VARIANT ?= cnb
 PUSH   = cf push -f cf/manifest.yml --vars-file cf/vars.$(VARIANT).yml
 
-.PHONY: help export assets vendor secrets push-web push init logs clean
+.PHONY: help export assets wheels wheels-fetch vendor secrets push-web push init logs clean
 
 help:
 	@grep -E '^## ' $(lastword $(MAKEFILE_LIST)) | sed 's/^## /  /'
@@ -73,6 +73,41 @@ vendor:
 	  --platform linux_x86_64
 	@cd "$(ROOT)" && echo "   $$(ls vendor | wc -l) Wheels, $$(du -sh vendor | cut -f1)"
 
+## wheels: cf/wheels/ fuer den Push herrichten: geteiltes Wheel zusammensetzen, Pruefsummen pruefen
+wheels:
+	@# cf/wheels/ fuehrt Wheels, die der Index der Zielplattform nicht hat
+	@# (psycopg-binary, lingua); requirements.txt zeigt mit --find-links
+	@# dorthin, pip nimmt sie von dort und alles andere vom Index. Das
+	@# lingua-Wheel hat 170 MB, GitHub nimmt keine Datei ueber 100 MB, Git LFS
+	@# steht nicht zur Verfuegung: deshalb liegt es im Repo als Teile zu 45 MB
+	@# (split), und hier wird es zusammengesetzt. .cfignore haelt die Teile aus
+	@# dem Droplet, .gitignore das Ganze aus dem Repo. Die Pruefsumme ist die
+	@# von PyPI (cf/wheels/SHA256SUMS); stimmt sie nicht, bricht der Lauf ab.
+	@# Scheitert die Pruefung, kommt das Zusammengesetzte weg: sonst bliebe
+	@# ein falsches Wheel liegen, und der naechste Lauf setzt nicht neu zusammen.
+	cd "$(ROOT)/cf/wheels" && for p in *.whl.part-aa; do \
+	  w="$${p%.part-aa}"; [ -f "$$w" ] || cat "$$w".part-* > "$$w"; done \
+	  && { sha256sum --check --quiet SHA256SUMS || { rm -f $$(ls *.whl.part-aa | sed 's/\.part-aa$$//'); exit 1; }; } \
+	  && echo "   cf/wheels: $$(ls *.whl | wc -l) Wheels, Pruefsummen stimmen"
+
+## wheels-fetch: die Wheels in cf/wheels/ von PyPI neu laden (nach einem Versionswechsel im Lockfile)
+wheels-fetch:
+	@# Versionen aus cf/requirements.lock.txt, Plattform wie bei vendor
+	@# (cflinuxfs4: x86_64, glibc 2.35, CPython 3.13). Was groesser als 45 MB
+	@# ist, wird geteilt; SHA256SUMS traegt die Summen der ganzen Wheels, zum
+	@# Vergleich mit PyPI. Danach: git add cf/wheels, und `make wheels` als
+	@# Gegenprobe.
+	cd "$(ROOT)" && rm -rf cf/wheels && mkdir cf/wheels && python3 -m pip download -q --no-deps -d cf/wheels \
+	  --only-binary=:all: --python-version 3.13 --implementation cp \
+	  --abi cp313 --abi abi3 --abi none \
+	  --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 \
+	  --platform manylinux_2_28_x86_64 --platform manylinux_2_34_x86_64 \
+	  --platform linux_x86_64 \
+	  $$(grep -E '^(lingua-language-detector|psycopg-binary)==' cf/requirements.lock.txt | sed 's/ ;.*//')
+	cd "$(ROOT)/cf/wheels" && sha256sum *.whl > SHA256SUMS && for w in *.whl; do \
+	  if [ $$(stat -c %s "$$w") -gt $$((45*1024*1024)) ]; then \
+	    split -b 45m --suffix-length=2 "$$w" "$$w.part-" && rm "$$w"; fi; done && ls -l
+
 ## secrets: benutzerdefinierten Dienst wger-secrets mit zufaelligem SECRET_KEY anlegen
 secrets:
 	@# Der Schluessel wird nirgends ausgegeben. Existiert der Dienst schon,
@@ -82,11 +117,11 @@ secrets:
 	    -p "$$(python3 -c 'import json,secrets; print(json.dumps({"secret_key": secrets.token_urlsafe(64)}))')"; fi
 
 ## push-web: nur wger-web (erster Push, vor init)
-push-web:
+push-web: wheels
 	cd "$(ROOT)" && $(PUSH) wger-web
 
 ## push: alle drei Apps, nacheinander
-push:
+push: wheels
 	@# Nacheinander statt `cf push -f cf/manifest.yml` in einem Zug: der staged
 	@# alle drei parallel, und Beat lief dabei in den Staging-Timeout der
 	@# Plattform (15 Minuten; gemessen 2026-11-21). Allein braucht jede App mit
@@ -110,4 +145,4 @@ logs:
 
 ## clean: Bauartefakte entfernen
 clean:
-	cd "$(ROOT)" && rm -rf node_modules staticfiles vendor wger/core/static/bootstrap-compiled.css wger/core/static/bootstrap-compiled.css.map
+	cd "$(ROOT)" && rm -rf node_modules staticfiles vendor cf/wheels/lingua_language_detector-*.whl wger/core/static/bootstrap-compiled.css wger/core/static/bootstrap-compiled.css.map

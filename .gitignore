@@ -102,3 +102,7 @@ media/
 
 # Cloud Foundry (cf/): erzeugt von `make -f cf/Makefile vendor`, nur fuer den klassischen Buildpack
 vendor/
+# Cloud Foundry (cf/): das lingua-Wheel liegt im Repo in Teilen unter 50 MB
+# (GitHub nimmt keine Datei ueber 100 MB); `make -f cf/Makefile wheels` setzt
+# es zusammen. Das Ganze gehoert nicht ins Repo, nur die Teile.
+cf/wheels/lingua_language_detector-*.whl

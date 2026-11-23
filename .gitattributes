@@ -12,3 +12,7 @@
 *.woff binary
 *.eot binary
 *.pdf binary
+# Wheels unter cf/wheels/ (und ihre Teile): "* text eol=lf" oben wuerde sonst
+# Zeilenenden in Binaerdateien umschreiben.
+*.whl binary
+*.whl.part-* binary
