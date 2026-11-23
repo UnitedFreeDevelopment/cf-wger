@@ -106,3 +106,5 @@ vendor/
 # (GitHub nimmt keine Datei ueber 100 MB); `make -f cf/Makefile wheels` setzt
 # es zusammen. Das Ganze gehoert nicht ins Repo, nur die Teile.
 cf/wheels/lingua_language_detector-*.whl
+# Cloud Foundry (cf/): erzeugt von `make -f cf/Makefile requirements`, je DETECTOR
+cf/requirements.active.txt

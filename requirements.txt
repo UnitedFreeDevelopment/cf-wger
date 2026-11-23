@@ -1,7 +1,12 @@
 # Cloud Foundry: der python_buildpack liest genau diese Datei im Wurzelverzeichnis;
 # PEP-735-Gruppen aus pyproject.toml kennt er nicht. Der Inhalt liegt unter cf/,
 # damit hier nur der Verweis steht. Neu erzeugen: make -f cf/Makefile export
--r cf/requirements.lock.txt
+# cf/requirements.active.txt ist erzeugt und nicht im Repo: `make -f cf/Makefile
+# requirements` kopiert je DETECTOR das Lockfile mit lingua
+# (cf/requirements.lock.txt) oder ohne (cf/requirements.llm.lock.txt) dorthin.
+# Nur so laesst sich die Paketliste je Zielplattform waehlen, ohne diese Datei
+# zu veraendern - der Buildpack liest genau diese eine Datei.
+-r cf/requirements.active.txt
 -r cf/requirements-cf.txt
 # Zuerst in cf/wheels/ nachsehen, dann im Index: fuer Plattformen, deren Index
 # einzelne Wheels nicht fuehrt (psycopg-binary, lingua). pip loest den Pfad

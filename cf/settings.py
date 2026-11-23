@@ -132,6 +132,25 @@ if _secrets:
     _setdefault('EMAIL_HOST_USER', _secrets.get('email_host_user'))
     _setdefault('EMAIL_HOST_PASSWORD', _secrets.get('email_host_password'))
 
+# ---------------------------------------------------------------- Spracherkennung
+# Upstream prueft die Sprache von Uebungstexten mit lingua (170 MB Wheel,
+# 306 MB im Droplet). Mit WGER_LANGUAGE_DETECTOR=llm (cf/manifest.yml, Variable
+# language_detector, Makefile DETECTOR=llm) ist lingua nicht installiert
+# (cf/requirements.llm.lock.txt); stattdessen liegt cf/shim vor den
+# site-packages, und `import lingua` in den zwei Upstream-Dateien trifft den
+# Shim, der ein Text-LLM der Plattform fragt. Der Endpunkt kommt aus dem
+# benutzerdefinierten Dienst wger-llm (url, api_key, model). Begruendung und
+# Grenzen: CLAUDE.md "Spracherkennung", cf/shim/lingua/__init__.py.
+import sys  # noqa: E402
+
+if os.environ.get('WGER_LANGUAGE_DETECTOR', 'lingua') == 'llm':
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shim'))
+    _llm = _binding(tags=('llm', 'openai'), names=('wger-llm',))
+    if _llm:
+        _setdefault('WGER_LLM_URL', _llm.get('url') or _llm.get('base_url') or _llm.get('uri'))
+        _setdefault('WGER_LLM_API_KEY', _llm.get('api_key') or _llm.get('token'))
+        _setdefault('WGER_LLM_MODEL', _llm.get('model'))
+
 # ---------------------------------------------------------------- Route
 # Die Route kennt nur die Plattform. Hinter dem Gorouter kommt jede Anfrage
 # als HTTP an, das Protokoll steht in X-Forwarded-Proto; ohne diese

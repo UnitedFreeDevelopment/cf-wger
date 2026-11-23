@@ -26,11 +26,13 @@ Wurzelverzeichnis.
 | `cf/storage.py` | whitenoise-Storage mit der Nachsicht von Upstream gegenüber fehlenden Source Maps |
 | `cf/manifest.yml` | drei Apps: `wger-web`, `wger-worker`, `wger-beat`; Lifecycle und Buildpack als Variablen |
 | `cf/vars.cnb.yml`, `cf/vars.buildpack.yml` | die zwei Bauweisen: Paketo über `cnb` (Vorgabe) oder klassischer `python_buildpack`; `VARIANT=` im Makefile wählt |
-| `cf/Makefile` | Export, Asset-Build mit `collectstatic`, Wheels, Vendoring, Push, Initialisierung |
+| `cf/Makefile` | Export, Asset-Build mit `collectstatic`, Paketliste je `DETECTOR`, Wheels, Vendoring, Push, Initialisierung |
 | `cf/requirements.lock.txt` | `uv export` aus `uv.lock`, mit `gunicorn` aus der Gruppe `docker` |
+| `cf/requirements.llm.lock.txt` | dasselbe ohne `lingua-language-detector`, für `DETECTOR=llm` |
+| `cf/shim/lingua/` | Ersatz für das Paket `lingua`, der ein Text-LLM der Plattform fragt. Nur mit `DETECTOR=llm` im Pfad; Upstream-Code bleibt unverändert |
 | `cf/requirements-cf.txt` | was CF zusätzlich braucht: `whitenoise` |
 | `cf/wheels/` | Wheels, die der Index der Zielplattform nicht führt: `psycopg-binary` und `lingua-language-detector` für CPython 3.13 auf `cflinuxfs4`. `requirements.txt` zeigt mit `--find-links` dorthin. Das lingua-Wheel (170 MB) liegt in Teilen zu 45 MB, weil GitHub keine Datei über 100 MB nimmt; `make -f cf/Makefile wheels` setzt es zusammen und prüft die Prüfsummen von PyPI (`SHA256SUMS`). `push` und `push-web` rufen das selbst auf |
-| `requirements.txt`, `runtime.txt`, `.python-version`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil Buildpacks sie dort suchen. `runtime.txt` liest der klassische `python_buildpack`, `.python-version` der Heroku-CNB, Paketo nimmt `BP_CPYTHON_VERSION` aus dem Manifest |
+| `requirements.txt`, `runtime.txt`, `.python-version`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil Buildpacks sie dort suchen. `requirements.txt` verweist auf `cf/requirements.active.txt`, die `make -f cf/Makefile requirements` je `DETECTOR` aus einem der zwei Lockfiles erzeugt (nicht im Repo; `push` ruft das auf). `runtime.txt` liest der klassische `python_buildpack`, `.python-version` der Heroku-CNB, Paketo nimmt `BP_CPYTHON_VERSION` aus dem Manifest |
 
 Upstream-Code ist nicht verändert; `.gitignore` hat vier Zeilen für
 erzeugte Dateien bekommen. Die Wurzel-`README.md` gehört Upstream und bleibt
@@ -45,6 +47,7 @@ unverändert; deshalb steht der Fork-Hinweis nur hier.
 | benutzerdefiniert | `wger-secrets` | Name; `secret_key`, optional `jwt_public_key`, `jwt_private_key`, `email_host_user`, `email_host_password` |
 | Redis (Tag `redis` oder `valkey`) | – | wenn gebunden: Cache, Sessions, Celery-Broker. Lokal nicht vorhanden |
 | S3 (Tag `s3`) | – | wenn gebunden: Media-Uploads. Lokal nicht vorhanden; **bitte prüfen**, die Schlüsselnamen der Credentials sind geraten |
+| benutzerdefiniert, nur `DETECTOR=llm` | `wger-llm` | Name oder Tag `llm`; `url` (Basis einer OpenAI-kompatiblen API, ohne `/chat/completions`), `model`, optional `api_key`. Siehe „Spracherkennung über ein LLM" |
 
 **Ohne Redis** liegen Cache, Sessions (`cached_db`) und die Login-Sperren
 von django-axes in der Datenbanktabelle `wger_cache`. **Ohne S3** landen
@@ -158,6 +161,57 @@ laufen alte und neue Version gleichzeitig gegen dieselbe Datenbank.
   ist für Beat belanglos.
 - `wger-worker` kann rollend, der Warm Shutdown ist gemessen.
 
+## Spracherkennung über ein LLM (`DETECTOR=llm`)
+
+Upstream prüft beim Anlegen von Übungstexten mit `lingua-language-detector`,
+ob die Sprache des Textes zur gewählten passt. Das Paket ist das größte der
+App: 170 MB als Wheel, 306 MB im Droplet, und auf einer Plattform ohne
+PyPI muss es als Teile im Repo mitreisen (`cf/wheels/`). Wo die Plattform
+ein Text-LLM als Dienst anbietet, geht es ohne: `DETECTOR=llm` baut die App
+ohne lingua, und `cf/shim/lingua/` stellt dem unveränderten Upstream-Code
+dieselbe Schnittstelle bereit, dahinter ein Aufruf an das LLM.
+
+Was sich mit `DETECTOR=llm` ändert, alles über `make -f cf/Makefile … DETECTOR=llm`:
+
+- `requirements`: `cf/requirements.active.txt` kommt aus
+  `cf/requirements.llm.lock.txt` (99 statt 100 Pakete).
+- `wheels`: das lingua-Wheel wird nicht zusammengesetzt, nur `psycopg-binary`
+  geht mit.
+- `push`: das Manifest bekommt `language_detector=llm`, die Apps
+  `WGER_LANGUAGE_DETECTOR=llm`. `cf/settings.py` setzt dann `cf/shim` vor
+  die site-packages und liest den Dienst `wger-llm`.
+- Dienst anlegen, vor dem Push:
+  `cf create-user-provided-service wger-llm -p '{"url": "https://…/v1", "model": "…", "api_key": "…"}'`
+  und `wger-llm` bei allen drei Apps binden (`cf bind-service`), oder im
+  Manifest unter `services` eintragen.
+
+Der Shim schickt den Text mit einer festen Anweisung („nur der ISO-639-1-Code")
+an `{url}/chat/completions`, Temperatur 0, höchstens fünf Tokens. Eine
+Antwort aus genau zwei Kleinbuchstaben zählt; `xx`, Sätze oder Leeres gelten
+als „nicht erkannt", das ergibt dieselbe Fehlermeldung wie bei lingua ohne
+Ergebnis. Antwortet der Dienst nicht, bricht das Speichern mit einem Fehler
+ab (`LanguageDetectionUnavailable`, HTTP 500) statt mit einer falschen
+Sprachmeldung: der Betreiber sieht es im Log, der Nutzer soll nicht
+umformulieren. Konfidenzwerte gibt es keine; Upstream schreibt sie nur ins
+Debug-Log.
+
+Gemessen 2026-11-23, lokal gegen einen Stub-Server durch den echten
+Upstream-Validator mit `cf.settings` und einer `wger-llm`-Bindung: Antwort
+`de` zu gewählt Deutsch geht durch; Antwort `en` liefert die
+Upstream-Meldung „detected language is English (en)"; `Sure! English.` und
+`xx` liefern „Could not detect"; ein toter Endpunkt wirft
+`LanguageDetectionUnavailable`. Der Stub sah Pfad, Bearer-Token und
+Modellname aus der Bindung. Mit `DETECTOR=lingua` kommt `import lingua` aus
+den site-packages, nicht aus dem Shim.
+
+Nicht gemessen, **bitte prüfen**: das Verhalten eines echten Modells auf die
+Anweisung (ob es wirklich nur den Code liefert, wie es bei sehr kurzen
+Texten wie „Kniebeuge" antwortet, und die Latenz je Aufruf, die beim
+Speichern einer Übung direkt sichtbar ist), ob die Schnittstelle der
+Zielplattform OpenAI-kompatibel ist, und ob sie ein Token oder etwas anderes
+verlangt. Die Schlüsselnamen der Bindung (`url`, `model`, `api_key`) sind
+festgelegt, nicht abgelesen.
+
 ## Auf eine andere Plattform
 
 Für TAS und Vanilla-Cloud-Foundry gilt dasselbe Repo; was sich unterscheidet,
@@ -207,12 +261,18 @@ Schritten, die ersten drei je Plattform:
    gehen Uploads nach S3. Beide Zweige sind lokal nicht messbar und dort
    als Erstes zu prüfen, die S3-Schlüsselnamen sind geraten. Terminiert die
    Plattform TLS, die Zeilen `WGER_SITE_SCHEME: http` im Manifest entfernen.
-5. **Wie unter „Erster Start"**: `secrets`, `assets`, `push-web`, `init`,
-   `push`, alle mit `VARIANT=buildpack`, falls so gewählt.
+5. **Spracherkennung wählen.** Bietet die Plattform ein Text-LLM als
+   Dienst, spart `DETECTOR=llm` das lingua-Wheel und 306 MB im Droplet;
+   siehe „Spracherkennung über ein LLM". Sonst bleibt `DETECTOR=lingua`
+   (Vorgabe), und `cf/wheels/` liefert das Wheel.
+6. **Wie unter „Erster Start"**: `secrets`, `assets`, `push-web`, `init`,
+   `push`, alle mit `VARIANT=buildpack` und `DETECTOR=llm`, falls so
+   gewählt, und mit gebundenem `wger-llm`.
 
 Nicht gemessen, **bitte prüfen**: ein Push mit `vendor/` auf dem klassischen
-Buildpack, die Variablen `((lifecycle))`, `((buildpack))` im Manifest, und
-ein Push mit `cf/wheels/` (beide Bauweisen). Die lokale Plattform war beim
+Buildpack, die Variablen `((lifecycle))`, `((buildpack))`,
+`((language_detector))` im Manifest, ein Push mit `cf/wheels/` (beide
+Bauweisen) und ein Push mit `DETECTOR=llm`. Die lokale Plattform war beim
 Schreiben nicht erreichbar (2026-11-22 und 2026-11-23). Die Gegenproben:
 `make -f cf/Makefile push-web VARIANT=buildpack` auf `cfk8s` mit `vendor/`,
 im Staging-Log muss „Running Pip Install (Vendored)" stehen; und
@@ -240,10 +300,11 @@ aus `cf/wheels/` findet (CPython 3.13, manylinux_2_17 x86_64), und dass
 - **Heroku-CNB als nächster Hebel**: `heroku/buildpack-python` braucht am
   Sample 290 MB weniger für Python als Paketo. Für wger: im Manifest den
   Buildpack tauschen, `.python-version` liegt schon bereit, dann messen.
-- **Größe im Container**: 1,1 GB bei 2 GB Quote, gemessen vor `cf/wheels/`;
-  das lingua-Wheel kommt mit dem App-Verzeichnis ins Droplet, also rund
-  170 MB dazu, **bitte prüfen**. Unter 800 MB geht es nur mit einer
-  Upstream-Änderung an `lingua` (306 MB installiert).
+- **Größe im Container**: 1,1 GB bei 2 GB Quote, gemessen vor `cf/wheels/`
+  mit `DETECTOR=lingua`; das lingua-Wheel kommt mit dem App-Verzeichnis ins
+  Droplet, also rund 170 MB dazu, **bitte prüfen**. Mit `DETECTOR=llm`
+  entfallen Wheel und die 306 MB installiertes lingua, erwartet rund 800 MB,
+  nicht gemessen.
 - **Zielplattformen** (TAS und Vanilla-CF): dort ist nach bisherigem Stand
   beim Staging kein PyPI erreichbar und kein anonymer Docker-Pull möglich.
   Der Weg dafür steht unter „Auf eine andere Plattform", der Kenntnisstand

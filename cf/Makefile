@@ -9,9 +9,17 @@ ROOT  := $(CURDIR)
 # cfk8s) oder buildpack (klassischer python_buildpack, fuer Plattformen ohne
 # Registry-Zugang). Begruendung in cf/manifest.yml.
 VARIANT ?= cnb
-PUSH   = cf push -f cf/manifest.yml --vars-file cf/vars.$(VARIANT).yml
+# Spracherkennung: lingua (lokal, 170 MB Wheel, Vorgabe) oder llm (Text-LLM der
+# Plattform ueber den Dienst wger-llm; lingua ist dann nicht installiert).
+# Begruendung in CLAUDE.md "Spracherkennung". Entscheidet die Paketliste
+# (requirements), ob das lingua-Wheel mitgeht (wheels) und die Variable
+# language_detector im Manifest.
+DETECTOR ?= lingua
+LOCK_lingua = cf/requirements.lock.txt
+LOCK_llm    = cf/requirements.llm.lock.txt
+PUSH   = cf push -f cf/manifest.yml --vars-file cf/vars.$(VARIANT).yml --var language_detector=$(DETECTOR)
 
-.PHONY: help export assets wheels wheels-fetch vendor secrets push-web push init logs clean
+.PHONY: help export assets requirements wheels wheels-fetch vendor secrets push-web push init logs clean
 
 help:
 	@grep -E '^## ' $(lastword $(MAKEFILE_LIST)) | sed 's/^## /  /'
@@ -22,6 +30,19 @@ export:
 	@# ohnehin auf dem sys.path. --group docker bringt gunicorn mit.
 	cd "$(ROOT)" && uv export --no-hashes --no-dev --no-emit-project --group docker \
 	  --format requirements-txt -o cf/requirements.lock.txt
+	@# Dasselbe ohne lingua, fuer DETECTOR=llm; beide Dateien liegen im Repo.
+	cd "$(ROOT)" && uv export --no-hashes --no-dev --no-emit-project --group docker \
+	  --no-emit-package lingua-language-detector \
+	  --format requirements-txt -o cf/requirements.llm.lock.txt
+
+## requirements: cf/requirements.active.txt je DETECTOR schreiben (push ruft das auf)
+requirements:
+	@# requirements.txt im Wurzelverzeichnis verweist auf diese erzeugte Datei,
+	@# weil der Buildpack nur die eine Datei liest und sie je Zielplattform
+	@# verschieden sein muss. Nicht im Repo (.gitignore).
+	@test -n "$(LOCK_$(DETECTOR))" || { echo "DETECTOR muss lingua oder llm sein, nicht '$(DETECTOR)'"; exit 1; }
+	cd "$(ROOT)" && cp $(LOCK_$(DETECTOR)) cf/requirements.active.txt
+	@echo "   DETECTOR=$(DETECTOR): $$(grep -c '==' cf/requirements.active.txt) Pakete"
 
 ## assets: node_modules/ und bootstrap-compiled.css vorbauen (vor jedem push)
 assets:
@@ -54,7 +75,7 @@ assets:
 	@cd "$(ROOT)" && du -sh staticfiles node_modules | sed 's/^/   /'
 
 ## vendor: Wheels fuer den klassischen Buildpack nach vendor/ laden (nur VARIANT=buildpack)
-vendor:
+vendor: requirements
 	@# Fuer Plattformen, deren Staging PyPI nicht erreicht. Liegt vendor/ im
 	@# Push, installiert der python_buildpack mit --no-index --find-links
 	@# daraus (src/python/supply/supply.go, RunPipVendored) und laedt nichts
@@ -65,7 +86,7 @@ vendor:
 	@# Quellpakete ab - die braeuchten beim Staging Build-Werkzeuge von PyPI.
 	@# Fehlt ein Wheel, bricht der Lauf ab und nennt das Paket.
 	cd "$(ROOT)" && rm -rf vendor && python3 -m pip download -q \
-	  -r cf/requirements.lock.txt -r cf/requirements-cf.txt -d vendor \
+	  -r cf/requirements.active.txt -r cf/requirements-cf.txt -d vendor \
 	  --only-binary=:all: --python-version 3.13 --implementation cp \
 	  --abi cp313 --abi abi3 --abi none \
 	  --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 \
@@ -74,7 +95,7 @@ vendor:
 	@cd "$(ROOT)" && echo "   $$(ls vendor | wc -l) Wheels, $$(du -sh vendor | cut -f1)"
 
 ## wheels: cf/wheels/ fuer den Push herrichten: geteiltes Wheel zusammensetzen, Pruefsummen pruefen
-wheels:
+wheels: requirements
 	@# cf/wheels/ fuehrt Wheels, die der Index der Zielplattform nicht hat
 	@# (psycopg-binary, lingua); requirements.txt zeigt mit --find-links
 	@# dorthin, pip nimmt sie von dort und alles andere vom Index. Das
@@ -85,10 +106,13 @@ wheels:
 	@# von PyPI (cf/wheels/SHA256SUMS); stimmt sie nicht, bricht der Lauf ab.
 	@# Scheitert die Pruefung, kommt das Zusammengesetzte weg: sonst bliebe
 	@# ein falsches Wheel liegen, und der naechste Lauf setzt nicht neu zusammen.
+	@# Mit DETECTOR=llm bleibt das lingua-Wheel zu Hause: nur loeschen, nicht
+	@# zusammensetzen, sonst ginge es mit dem App-Verzeichnis ins Droplet.
 	cd "$(ROOT)/cf/wheels" && for p in *.whl.part-aa; do \
-	  w="$${p%.part-aa}"; [ -f "$$w" ] || cat "$$w".part-* > "$$w"; done \
-	  && { sha256sum --check --quiet SHA256SUMS || { rm -f $$(ls *.whl.part-aa | sed 's/\.part-aa$$//'); exit 1; }; } \
-	  && echo "   cf/wheels: $$(ls *.whl | wc -l) Wheels, Pruefsummen stimmen"
+	  w="$${p%.part-aa}"; \
+	  if [ "$(DETECTOR)" = llm ]; then rm -f "$$w"; else [ -f "$$w" ] || cat "$$w".part-* > "$$w"; fi; done \
+	  && { sha256sum --check --quiet --ignore-missing SHA256SUMS || { rm -f $$(ls *.whl.part-aa | sed 's/\.part-aa$$//'); exit 1; }; } \
+	  && echo "   cf/wheels (DETECTOR=$(DETECTOR)): $$(ls *.whl | wc -l) Wheels, Pruefsummen stimmen"
 
 ## wheels-fetch: die Wheels in cf/wheels/ von PyPI neu laden (nach einem Versionswechsel im Lockfile)
 wheels-fetch:
@@ -145,4 +169,4 @@ logs:
 
 ## clean: Bauartefakte entfernen
 clean:
-	cd "$(ROOT)" && rm -rf node_modules staticfiles vendor cf/wheels/lingua_language_detector-*.whl wger/core/static/bootstrap-compiled.css wger/core/static/bootstrap-compiled.css.map
+	cd "$(ROOT)" && rm -rf node_modules staticfiles vendor cf/requirements.active.txt cf/wheels/lingua_language_detector-*.whl wger/core/static/bootstrap-compiled.css wger/core/static/bootstrap-compiled.css.map

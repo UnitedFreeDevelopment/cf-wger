@@ -10,6 +10,12 @@
 # Python-Version: BP_CPYTHON_VERSION fuer Paketo, runtime.txt fuer den
 # klassischen Buildpack - beide auf 3.13 halten.
 #
+# language_detector (lingua oder llm, Makefile DETECTOR=) waehlt, ob die
+# Spracherkennung von Uebungstexten lokal mit lingua laeuft oder ueber ein
+# Text-LLM der Plattform (Dienst wger-llm, cf/settings.py). Die Paketliste
+# unterscheidet sich dann (requirements.txt), deshalb ist es eine Bauweise
+# und kein Laufzeitschalter.
+#
 # Was hier NICHT steht: SECRET_KEY und andere Geheimnisse. Die kommen aus dem
 # benutzerdefinierten Dienst wger-secrets (cf/README.md).
 ---
@@ -43,6 +49,7 @@ applications:
       DJANGO_SETTINGS_MODULE: cf.settings
       PYTHONUNBUFFERED: "1"
       BP_CPYTHON_VERSION: "3.13.*"
+      WGER_LANGUAGE_DETECTOR: ((language_detector))
       WEB_CONCURRENCY: "2"
       # Die lokale Plattform terminiert kein TLS fuer App-Routen; SITE_URL
       # und absolute Links muessen das wissen. Auf einer Plattform mit HTTPS
@@ -70,6 +77,7 @@ applications:
       DJANGO_SETTINGS_MODULE: cf.settings
       PYTHONUNBUFFERED: "1"
       BP_CPYTHON_VERSION: "3.13.*"
+      WGER_LANGUAGE_DETECTOR: ((language_detector))
       WGER_SITE_SCHEME: http
 
   - name: wger-beat
@@ -95,4 +103,5 @@ applications:
       DJANGO_SETTINGS_MODULE: cf.settings
       PYTHONUNBUFFERED: "1"
       BP_CPYTHON_VERSION: "3.13.*"
+      WGER_LANGUAGE_DETECTOR: ((language_detector))
       WGER_SITE_SCHEME: http
