@@ -59,6 +59,12 @@ Reihenfolge beim ersten Start: `secrets`, `assets`, `push-web`, `init`, `push` (
 
 Platte unter 2G geht nicht: das Droplet belegt 1,1 GB, davon 306 MB `lingua`, 370 MB CPython, 597 MB Pakete. Speicher von `wger-web` über `WEB_CONCURRENCY` steuern; der Bedarf je zusätzlichem Gunicorn-Worker ist nicht gemessen, vor einer Erhöhung an `cf app wger-web` ablesen.
 
+## Spracherkennung: lingua bleibt (entschieden 2026-11-23)
+
+wger prüft beim Anlegen von Übungstexten mit `lingua-language-detector`, ob die Sprache des Textes zur gewählten passt (`wger/exercises/api/validators.py`, `wger/core/api/serializers.py`). Das Paket kostet 170 MB als Wheel und 306 MB installiert; es bleibt trotzdem, weil jeder Ersatz ein Upstream-Eingriff an zwei Stellen wäre.
+- `openai/whisper-large-v3-turbo` der Zielplattform ist **kein Ersatz**: Whisper erkennt Sprache aus Audio und nimmt keinen Text entgegen.
+- Beschränkung auf Deutsch und Englisch (`LanguageDetectorBuilder.from_languages(GERMAN, ENGLISH)` statt `from_all_languages()`), gemessen 2026-11-23 lokal, lingua 2.2.0, je ein Prozess: Speicher nach vier Erkennungen 27 MB statt 138 MB; Wheel und Installation bleiben gleich groß, die Modelle aller Sprachen liegen ohnehin bei. Kurze Eingaben werden besser („Kniebeuge" ist mit allen Sprachen „Dutch", mit de+en „German"), fremdsprachige Texte werden aber zwangsweise Deutsch oder Englisch zugeordnet (ein spanischer Satz wird „English"). Für eine Instanz, die nur Deutsch und Englisch führt, ist das ein Gewinn; nicht gebaut, weil es Upstream-Code ändert. Falls doch: als Overlay in `cf/`, nicht in den zwei Upstream-Dateien.
+
 ## Hinweise
 - Das CF-Dateisystem ist flüchtig: keine lokalen Uploads.
 - Stemcells sind BOSH-Plattformebene, für die App nicht relevant. Die App läuft auf dem Root-Filesystem der Plattform (z. B. `cflinuxfs4`).
