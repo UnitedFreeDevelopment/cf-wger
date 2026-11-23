@@ -193,9 +193,13 @@ Vorgabe ist dann `https`.
 Die Validierung läuft beim Anlegen einer Übung. Als eingeloggter Nutzer in
 der Web-Oberfläche eine Übung mit deutscher Beschreibung und Sprache
 Deutsch anlegen, dann dieselbe mit englischer Beschreibung und Sprache
-Deutsch. Oder über die API mit Token (`/api/v2/login/`, dann
-`/api/v2/exercise-translation/` oder der Sprachcheck-Endpunkt
-`/api/v2/check-language/`, Feldnamen in `wger/core/api/serializers.py`).
+Deutsch. Oder über die API: API-Schlüssel in der Web-Oberfläche unter
+`/<sprache>/user/api-key` erzeugen (Pfad mit Sprachpräfix, etwa `/de/`),
+Header `Authorization: Token <schlüssel>`, dann der Sprachcheck-Endpunkt
+`POST /api/v2/check-language/` oder `/api/v2/exercise-translation/`;
+Feldnamen in `wger/core/api/serializers.py`. Es gibt keinen
+Login-Endpunkt `/api/v2/login/`; `/api/v2/token/refresh` und `/verify`
+gehören zu JWT und brauchen ein vorhandenes Token.
 
 Erwartet:
 
