@@ -91,7 +91,7 @@ django==6.0.10
     #   wger
 django-activity-stream==2.0.0
     # via wger
-django-allauth==65.21.1
+django-allauth==65.22.1
     # via wger
 django-axes==9.0.0
     # via wger
