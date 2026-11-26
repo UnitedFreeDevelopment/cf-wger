@@ -16,3 +16,8 @@
 # Zeilenenden in Binaerdateien umschreiben.
 *.whl binary
 *.whl.part-* binary
+# Uebungsbilder unter cf/exercise-images/ (cf/README.md "Uebungsbilder"):
+# webp und jfif stehen nicht in der Liste oben, und "* text eol=lf" hat
+# zwoelf davon beim ersten Commit umgeschrieben. Das Verzeichnis als Ganzes,
+# damit kein weiteres Format durchrutscht.
+cf/exercise-images/files/** binary

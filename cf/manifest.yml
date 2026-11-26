@@ -45,6 +45,9 @@ applications:
       - wger-db
       - wger-mq
       - wger-secrets
+      # Object Storage fuer Uploads und Uebungsbilder (cf/settings.py, S3).
+      # Lokal: make -f cf/Makefile s3-dev legt versitygw (S3) und den Dienst an.
+      - wger-s3
     env:
       DJANGO_SETTINGS_MODULE: cf.settings
       PYTHONUNBUFFERED: "1"
@@ -73,6 +76,7 @@ applications:
       - wger-db
       - wger-mq
       - wger-secrets
+      - wger-s3
     env:
       DJANGO_SETTINGS_MODULE: cf.settings
       PYTHONUNBUFFERED: "1"
@@ -99,6 +103,7 @@ applications:
       - wger-db
       - wger-mq
       - wger-secrets
+      - wger-s3
     env:
       DJANGO_SETTINGS_MODULE: cf.settings
       PYTHONUNBUFFERED: "1"

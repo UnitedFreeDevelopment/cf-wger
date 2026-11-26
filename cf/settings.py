@@ -103,11 +103,13 @@ if os.environ.get('CELERY_BROKER'):
     _setdefault('USE_CELERY', 'True')
 
 # ---------------------------------------------------------------- S3
-# Das CF-Dateisystem ist fluechtig; Uploads gehoeren in einen Object Storage.
-# Auf der lokalen Plattform gibt es keinen - dieser Block ist gegen keine
-# echte Bindung gemessen. BITTE PRUEFEN, sobald ein S3-Angebot gebunden ist:
-# Schluesselnamen der Credentials und ob main.py mit Pfad-Adressierung
-# (MinIO) zurechtkommt.
+# Das CF-Dateisystem ist fluechtig; Uploads und die Uebungsbilder gehoeren in
+# einen Object Storage. Gemessen 2026-11-26 gegen versitygw (S3-Gateway) als CF-App
+# (cf/dev/versitygw.yml): Upload ueber download-exercise-images und
+# cf/exercise_images.py, Auslieferung an den Browser ueber signierte URLs.
+# Gegen das S3 der Zielplattform nicht gemessen; die Schluesselnamen der
+# Bindung sind die des benutzerdefinierten Dienstes wger-s3 (cf/README.md),
+# fuer einen Marktplatz-Dienst stehen hier Alternativen, BITTE PRUEFEN.
 _s3 = _binding(tags=('s3', 'object-storage', 'minio'), names=('wger-s3',))
 if _s3:
     _endpoint = _s3.get('endpoint') or _s3.get('endpoint_url') or _s3.get('url') or ''
@@ -118,6 +120,7 @@ if _s3:
     _setdefault('AWS_S3_REGION_NAME', _s3.get('region') or 'us-east-1')
     _setdefault('AWS_S3_DOMAIN', urlparse(_endpoint).hostname or '')
     _setdefault('AWS_S3_ENDPOINT_URL', _endpoint)
+    # Der zweite Teil steht unten, nach dem Import von main.py.
 
 # ---------------------------------------------------------------- Geheimnisse
 # Kein SECRET_KEY im Manifest oder Repo: er kommt aus einem benutzer-
@@ -201,3 +204,35 @@ if not os.environ.get('DJANGO_CACHE_BACKEND'):
             'TIMEOUT': 30 * 24 * 60 * 60,
         }
     }
+
+# ---------------------------------------------------------------- S3, Teil 2
+# main.py nimmt AWS an: Dateien liegen unter bucket.region.domain, der Browser
+# liest sie dort ohne Signatur, der Bucket ist also anonym lesbar. Ein
+# S3-kompatibler Dienst einer Plattform hat weder diese Namensform noch einen
+# anonymen Bucket. Deshalb:
+# - Pfad-Adressierung (endpoint/bucket/schluessel): eine CF-Route kann
+#   bucket.host nicht aufloesen; versitygw, MinIO und die meisten Dienste koennen Pfade.
+# - signierte URLs: der Browser liest direkt vom Endpunkt, mit den Rechten
+#   der App und befristet (AWS_QUERYSTRING_EXPIRE, Vorgabe 3600 s). Der
+#   Endpunkt muss dafuer vom Browser erreichbar sein, nicht nur von der App.
+# Traegt die Bindung `public_url` (Adresse bis einschliesslich Bucket, z. B.
+# https://s3.example/wger-media), liest der Browser unsigniert von dort - der
+# Bucket muss dann anonym lesbar sein. Das ist der Weg, wenn der Endpunkt
+# vom Browser aus nicht erreichbar ist, wohl aber ein CDN oder Proxy davor.
+# Gemessen: signierte URLs am versitygw (cf/README.md "Uebungsbilder");
+# der Weg ueber public_url nicht, BITTE PRUEFEN.
+if _s3:
+    AWS_S3_ADDRESSING_STYLE = _s3.get('addressing_style') or 'path'
+    AWS_S3_SIGNATURE_VERSION = 's3v4'
+    _location = STORAGES['default']['OPTIONS']['location']  # noqa: F405
+    _public = _s3.get('public_url')
+    if _public:
+        _p = urlparse(_public)
+        AWS_S3_URL_PROTOCOL = f'{_p.scheme}:'
+        AWS_S3_CUSTOM_DOMAIN = f'{_p.netloc}{_p.path.rstrip("/")}'
+        AWS_QUERYSTRING_AUTH = False
+        MEDIA_URL = f'{_public.rstrip("/")}/{_location}/'
+    else:
+        AWS_S3_CUSTOM_DOMAIN = None
+        AWS_QUERYSTRING_AUTH = True
+        MEDIA_URL = f'{AWS_S3_ENDPOINT_URL.rstrip("/")}/{AWS_STORAGE_BUCKET_NAME}/{_location}/'  # noqa: F405

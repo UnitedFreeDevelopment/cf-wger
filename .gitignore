@@ -108,3 +108,5 @@ vendor/
 cf/wheels/lingua_language_detector-*.whl
 # Cloud Foundry (cf/): erzeugt von `make -f cf/Makefile requirements`, je DETECTOR
 cf/requirements.active.txt
+# Zugangsdaten des Entwicklungs-S3 (versitygw) (make -f cf/Makefile s3-dev)
+cf/dev/.s3-dev.json

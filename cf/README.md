@@ -32,6 +32,10 @@ Wurzelverzeichnis.
 | `cf/requirements.llm.lock.txt` | dasselbe ohne `lingua-language-detector`, für `DETECTOR=llm` |
 | `cf/shim/lingua/` | Ersatz für das Paket `lingua`, der ein Text-LLM der Plattform fragt. Nur mit `DETECTOR=llm` im Pfad; Upstream-Code bleibt unverändert |
 | `cf/requirements-cf.txt` | was CF zusätzlich braucht: `whitenoise` |
+| `cf/exercise_images.py` | Übungsbilder als Dateien plus Datenbankeinträge aus einer Instanz exportieren und in eine andere importieren; Zuordnung über UUIDs. Siehe „Übungsbilder" |
+| `cf/exercise-images/` | der Export: `images.json` und `files/`, 346 Bilder, 189 MB. Geht mit dem Push ins Droplet, damit eine Plattform ohne Internet die Bilder hat |
+| `cf/appenv.sh` | gibt einer `cf ssh`-Sitzung PATH, PYTHONPATH und Arbeitsverzeichnis des laufenden App-Prozesses; ohne das gibt es dort kein `python` |
+| `cf/dev/` | nur für die lokale Plattform: versitygw als S3-Ersatz (`versitygw.yml`), Bucket anlegen (`s3_bucket.py`); die Zugangsdaten `.s3-dev.json` sind gitignored |
 | `cf/wheels/` | Wheels, die der Index der Zielplattform nicht führt: `psycopg-binary` und `lingua-language-detector` für CPython 3.13 auf `cflinuxfs4`. `requirements.txt` zeigt mit `--find-links` dorthin. Das lingua-Wheel (170 MB) liegt in Teilen zu 45 MB, weil GitHub keine Datei über 100 MB nimmt; `make -f cf/Makefile wheels` setzt es zusammen und prüft die Prüfsummen von PyPI (`SHA256SUMS`). `push` und `push-web` rufen das selbst auf |
 | `requirements.txt`, `runtime.txt`, `.python-version`, `.cfignore` | müssen im Wurzelverzeichnis liegen, weil Buildpacks sie dort suchen. `requirements.txt` verweist auf `cf/requirements.active.txt`, die `make -f cf/Makefile requirements` je `DETECTOR` aus einem der zwei Lockfiles erzeugt (nicht im Repo; `push` ruft das auf). `runtime.txt` liest der klassische `python_buildpack`, `.python-version` der Heroku-CNB, Paketo nimmt `BP_CPYTHON_VERSION` aus dem Manifest |
 
@@ -47,7 +51,7 @@ unverändert; deshalb steht der Fork-Hinweis nur hier.
 | RabbitMQ (`rabbitmq-cluster`, Plan `dev`) | `wger-mq` | Tag `amqp`; Celery-Broker, Ergebnis-Backend `rpc://` |
 | benutzerdefiniert | `wger-secrets` | Name; `secret_key`, optional `jwt_public_key`, `jwt_private_key`, `email_host_user`, `email_host_password` |
 | Redis (Tag `redis` oder `valkey`) | – | wenn gebunden: Cache, Sessions, Celery-Broker. Lokal nicht vorhanden |
-| S3 (Tag `s3`) | – | wenn gebunden: Media-Uploads. Lokal nicht vorhanden; **bitte prüfen**, die Schlüsselnamen der Credentials sind geraten |
+| S3 (Tag `s3`, `object-storage` oder `minio`, oder Name) | `wger-s3` | wenn gebunden: Media-Uploads und Übungsbilder. Schlüssel `endpoint`, `bucket`, `access_key_id`, `secret_access_key`; optional `region`, `addressing_style` (Vorgabe `path`), `public_url`. Lokal ein benutzerdefinierter Dienst auf versitygw (`make -f cf/Makefile s3-dev`); gegen das S3 der Zielplattform nicht gemessen, dessen Schlüsselnamen **bitte prüfen** und in `cf/settings.py` ergänzen |
 | benutzerdefiniert, nur `DETECTOR=llm` | `wger-llm` | Name oder Tag `llm`; `url` (Basis einer OpenAI-kompatiblen API, ohne `/chat/completions`), `model`, optional `api_key`. Siehe „Spracherkennung über ein LLM" |
 
 **Ohne Redis** liegen Cache, Sessions (`cached_db`) und die Login-Sperren
@@ -69,11 +73,16 @@ Plattform das nicht, nimmt `VARIANT=buildpack` den klassischen
 cf create-service cnpg-postgresql small wger-db
 cf create-service rabbitmq-cluster dev wger-mq
 make -f cf/Makefile secrets      # wger-secrets mit zufaelligem SECRET_KEY
+make -f cf/Makefile s3-dev       # nur lokal: versitygw als App, Bucket, Dienst wger-s3
 make -f cf/Makefile assets       # node_modules/ (38 MB) und bootstrap-compiled.css
 make -f cf/Makefile push-web     # nur wger-web; Staging mit collectstatic
 make -f cf/Makefile init         # Migrationen, Fixtures, admin, Cache-Tabelle, Site-URL
+make -f cf/Makefile images-import  # 346 Uebungsbilder aus cf/exercise-images/ nach S3 und Datenbank
 make -f cf/Makefile push         # alle drei Apps
 ```
+
+Auf einer Plattform mit S3-Angebot entfällt `s3-dev`; stattdessen
+`cf create-service <s3-angebot> <plan> wger-s3`, siehe „Dienste".
 
 `init` legt den Benutzer `admin` mit dem Passwort `adminadmin` an (Upstream-
 Verhalten von `wger bootstrap`). **Danach ändern.**
@@ -213,6 +222,41 @@ Zielplattform OpenAI-kompatibel ist, und ob sie ein Token oder etwas anderes
 verlangt. Die Schlüsselnamen der Bindung (`url`, `model`, `api_key`) sind
 festgelegt, nicht abgelesen.
 
+## Übungsbilder
+
+Upstream holt die Bilder zu den Übungen mit `download-exercise-images` von
+wger.de in den Media-Storage und legt je Bild einen Eintrag
+`exercises.ExerciseImage` an; erst der Eintrag verbindet Bild und Übung.
+Auf einer Plattform ohne Internet gibt es diesen Weg nicht, deshalb kommen
+die Bilder mit dem Repo: `cf/exercise-images/` enthält `images.json` (die
+Einträge, Übungen über ihre UUID benannt) und `files/` (die Bilder, 346
+Stück, 189 MB). Drei Targets in `cf/Makefile`:
+
+| Target | Was | Wo |
+|---|---|---|
+| `images-fetch` | Upstream-Download als Task; schreibt in den Default-Storage, auf CF also nach S3. Ohne S3-Bindung sind die Dateien mit dem Task weg | nur mit Internet |
+| `images-export` | holt Einträge und Dateien per `cf ssh -T` als tar-Strom nach `cf/exercise-images/`; ein Task könnte nichts zurückgeben | nur mit Internet, einmalig |
+| `images-import` | liest `cf/exercise-images/` aus dem Droplet in S3 und Datenbank; idempotent, Zuordnung über UUIDs, fehlende Übungen werden übersprungen | überall, nach `init` |
+
+Gemessen 2026-11-26 auf `cfk8s` mit versitygw als S3: `images-import` als
+Task mit 1G Speicher, 346 importiert, 0 übersprungen, rund 15 Sekunden;
+danach zählt `/api/v2/exerciseimage/` 346, und ein Bild kommt über die
+signierte URL vom S3-Gateway mit HTTP 200 (`image/png`). Der Bucket in
+versitygw liegt im flüchtigen `/tmp` der App: nach einem Neustart der App
+ist er leer, `s3-dev` legt ihn neu an und `images-import` füllt ihn wieder.
+Die Datenbankeinträge überleben in PostgreSQL.
+
+Wie `cf/settings.py` den Storage anbindet, und warum anders als Upstream:
+`settings/main.py` nimmt AWS an (Bucket als Hostname, anonym lesbarer
+Bucket). Ein S3-kompatibler Dienst einer Plattform hat weder das eine noch
+das andere. Deshalb Pfad-Adressierung (`endpoint/bucket/schlüssel`) und
+signierte URLs, mit denen der Browser direkt vom Endpunkt liest, befristet
+auf `AWS_QUERYSTRING_EXPIRE` (Vorgabe 3600 s). Der Endpunkt muss dafür vom
+Browser erreichbar sein, nicht nur von der App. Trägt die Bindung
+`public_url` (Adresse bis einschließlich Bucket), liest der Browser
+unsigniert von dort, und der Bucket muss anonym lesbar sein; dieser Weg
+ist **nicht gemessen, bitte prüfen**.
+
 ## Auf eine andere Plattform
 
 Für TAS und Vanilla-Cloud-Foundry gilt dasselbe Repo; was sich unterscheidet,
@@ -292,8 +336,9 @@ aus `cf/wheels/` findet (CPython 3.13, manylinux_2_17 x86_64), und dass
   nacheinander pushen; `make -f cf/Makefile push` tut das.
 - **Beat**: ob eine geplante Aufgabe zu ihrer Zeit läuft, ist erst nach einem
   Tag Laufzeit messbar.
-- **S3**: kein Angebot auf der lokalen Plattform. Der Zweig in
-  `cf/settings.py` ist ungetestet.
+- **S3**: lokal gegen versitygw gemessen (signierte URLs, Pfad-Adressierung),
+  nicht gegen das S3-Angebot der Zielplattform; Schlüsselnamen der dortigen
+  Bindung und der Weg über `public_url` sind offen.
 - **E-Mail**: Upstream braucht `ENABLE_EMAIL` plus SMTP-Variablen; lokal gibt
   es keinen SMTP-Dienst. Die Zugangsdaten gehören nach `wger-secrets`.
 - **Prometheus**: `EXPOSE_PROMETHEUS_METRICS=True` schaltet `/prometheus/metrics`

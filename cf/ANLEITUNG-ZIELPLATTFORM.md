@@ -5,7 +5,7 @@ Clone dieses Repos auf Branch `cf-port` und einem Arbeitsrechner mit `make`,
 `git`, `python3`, `sha256sum`. Ziel: wger läuft dort als drei Apps, ohne
 lingua, mit Spracherkennung über das Text-LLM der Plattform.
 
-Stand 2026-11-23. Alles hier ist auf der lokalen Entwicklungsplattform
+Stand 2026-11-26. Alles hier ist auf der lokalen Entwicklungsplattform
 `cfk8s` oder lokal gemessen, **nichts davon auf der Zielplattform**. Wo eine
 Annahme steht, ist sie als solche markiert. Die Aufgabe ist deshalb zur
 Hälfte Messen: jedes Ergebnis gehört in `cf/README.md`, als Commit auf
@@ -27,6 +27,16 @@ einem Branch ab `cf-port`.
 4. **Aufruf immer aus dem Wurzelverzeichnis:** `make -f cf/Makefile <ziel>`.
 5. **Reihenfolge einhalten.** Erst messen (Schritt 1), dann entscheiden,
    dann pushen. Die Apps nacheinander, nie alle drei in einem `cf push`.
+6. **Die Dienste der Plattform nutzen, keine Ersatzlösungen mitbringen.**
+   PostgreSQL, Redis, S3 und das LLM kommen aus `cf marketplace` der
+   Zielplattform, als Instanzen `wger-db`, `wger-redis`, `wger-s3`,
+   `wger-llm`. Was unter `cf/dev/` liegt und das Target `s3-dev`, ersetzt
+   nur auf der Entwicklungsplattform `cfk8s` das fehlende S3 durch eine
+   eigene App (versitygw) und wird auf der Zielplattform **nicht**
+   aufgerufen; ebenso `images-fetch` und `images-export`, die Internet
+   brauchen. Fehlt ein Dienst im Marktplatz, steht das in der Rückmeldung
+   (Schritt 7), und `cf/settings.py` fällt auf Datenbank und flüchtiges
+   Dateisystem zurück, nicht auf eine selbst gepushte Ersatz-App.
 
 ## Schritt 1: Plattform messen
 
@@ -62,6 +72,7 @@ Zu klären, je eine Zeile Antwort:
 cf create-service <postgres-angebot> <plan> wger-db
 cf create-service <redis-angebot> <plan> wger-redis     # falls es Redis gibt
 cf create-service <rabbitmq-angebot> <plan> wger-mq     # sonst RabbitMQ
+cf create-service <s3-angebot> <plan> wger-s3           # Uploads und Uebungsbilder
 make -f cf/Makefile secrets                              # wger-secrets mit SECRET_KEY
 ```
 
@@ -75,6 +86,21 @@ vergibt, mit `cf env wger-web` nach dem ersten Push ablesen.
 Die Bindung der Datenbank muss `uri` oder `fqdn-uri` tragen oder die Felder
 `host`, `port`, `username`, `password`, `dbname`. Andere Schlüsselnamen:
 in `cf/settings.py` ergänzen, Abschnitt „Datenbank", mit Kommentar.
+
+Die S3-Bindung wird über Tag `s3`, `object-storage` oder `minio` oder über
+den Namen `wger-s3` gefunden und muss `endpoint`, `bucket`,
+`access_key_id`, `secret_access_key` tragen; optional `region`,
+`addressing_style` (Vorgabe `path`), `public_url`. Andere Schlüsselnamen:
+`cf/settings.py`, Abschnitt „S3", mit Kommentar. Der Endpunkt muss vom
+Browser der Nutzer erreichbar sein, weil die App Bilder über signierte URLs
+direkt von dort ausliefert. Ist er das nicht, gibt es aber einen anonym
+lesbaren Zugang über CDN oder Proxy: dessen Adresse bis einschließlich
+Bucket als `public_url` in die Bindung, mit
+`cf update-user-provided-service` nur, falls der Dienst benutzerdefiniert
+ist; bei einem Marktplatz-Dienst steht das Feld nicht zur Verfügung, dann
+in `cf/settings.py` ergänzen und notieren. Der Weg über `public_url` ist
+**nicht gemessen**. Ohne S3-Bindung landen Uploads und Bilder im
+flüchtigen Dateisystem und sind beim nächsten Neustart weg.
 
 ## Schritt 3: Das LLM prüfen und binden
 
@@ -179,10 +205,19 @@ Dann:
 
 ```
 make -f cf/Makefile init $V              # Migrationen, Fixtures, admin, Cache-Tabelle, Site-URL
+make -f cf/Makefile images-import $V     # 346 Uebungsbilder aus cf/exercise-images/ nach S3 und Datenbank
 make -f cf/Makefile push $V              # alle drei Apps, nacheinander
 ```
 
 `init` legt `admin` mit Passwort `adminadmin` an. **Sofort ändern.**
+
+`images-import` liest das Verzeichnis `cf/exercise-images/` aus dem
+Droplet und schreibt über die S3-Bindung; es ist idempotent. Erwartet
+(lokal gemessen): „346 Bilder importiert, 0 uebersprungen" im Task-Log,
+danach `count` 346 unter `/api/v2/exerciseimage/`, und die `image`-URL
+eines Eintrags liefert mit `curl` HTTP 200 und `image/png`. Liefert sie
+etwas anderes, erreicht der Browser den S3-Endpunkt nicht; siehe Schritt 2
+zu `public_url`.
 
 Terminiert die Plattform TLS für App-Routen, die Zeilen
 `WGER_SITE_SCHEME: http` im Manifest bei allen drei Apps entfernen; die
@@ -224,7 +259,9 @@ Hinein gehört, in `cf/README.md`:
   ohne Hostnamen und ohne Werte.
 - Aus Schritt 3: Format der LLM-Antworten, die vier gemessenen Antworten,
   die Dauer je Aufruf, ob die Anweisung geändert werden musste.
-- Aus Schritt 5: Speicher und Platte je App nach `cf app`, Staging-Dauer.
+- Aus Schritt 5: Speicher und Platte je App nach `cf app`, Staging-Dauer;
+  die Schlüsselnamen der S3-Bindung, das Ergebnis von `images-import` und
+  ob ein Bild im Browser lädt.
 - Aus Schritt 6: die Tabelle, ausgefüllt.
 - Jeden Punkt, der in dieser Anleitung oder in `cf/README.md` als „bitte
   prüfen" steht und jetzt gemessen ist: die Markierung entfernen und den

@@ -1,6 +1,6 @@
 # Betrieb von wger auf Cloud Foundry. Aufruf aus dem Wurzelverzeichnis:
 #   make -f cf/Makefile <target>
-# Reihenfolge beim ersten Mal: secrets, assets, push-web, init, push.
+# Reihenfolge beim ersten Mal: secrets, s3-dev (nur lokal), assets, push-web, init, images-import, push.
 SHELL := /bin/bash
 # CURDIR statt $(dir ...): make zerlegt Pfade mit Leerzeichen, und das
 # Arbeitsverzeichnis hat eines. Deshalb der Aufruf aus dem Wurzelverzeichnis.
@@ -19,7 +19,7 @@ LOCK_lingua = cf/requirements.lock.txt
 LOCK_llm    = cf/requirements.llm.lock.txt
 PUSH   = cf push -f cf/manifest.yml --vars-file cf/vars.$(VARIANT).yml --var language_detector=$(DETECTOR)
 
-.PHONY: help export assets requirements wheels wheels-fetch vendor secrets push-web push init logs clean
+.PHONY: help export assets requirements wheels wheels-fetch vendor secrets s3-dev push-web push init images-fetch images-export images-import logs clean
 
 help:
 	@grep -E '^## ' $(lastword $(MAKEFILE_LIST)) | sed 's/^## /  /'
@@ -140,6 +140,25 @@ secrets:
 	  cf create-user-provided-service wger-secrets \
 	    -p "$$(python3 -c 'import json,secrets; print(json.dumps({"secret_key": secrets.token_urlsafe(64)}))')"; fi
 
+## s3-dev: versitygw (S3) als CF-App, Bucket und Dienst wger-s3 anlegen (nur lokale Plattform, die kein S3 hat)
+S3_DEV = cf/dev/.s3-dev.json
+s3-dev:
+	@# Zugangsdaten einmal erzeugen und lokal behalten (.gitignore): ein
+	@# zweiter Lauf nimmt dieselben, sonst passen Dienst und versitygw nicht mehr
+	@# zusammen. Der Endpunkt ist die Route der App auf der Apps-Domaene der
+	@# Plattform; dieselbe Adresse gilt fuer die App und fuer den Browser.
+	@test -f $(S3_DEV) || { d=$$(cf domains | awk 'NR>3 && $$2=="shared" && $$3!="true"{print $$1; exit}'); \
+	  python3 -c "import json,secrets; json.dump({'endpoint': 'http://wger-s3-dev.$$d', 'bucket': 'wger-media', \
+	    'access_key_id': secrets.token_hex(8), 'secret_access_key': secrets.token_urlsafe(24)}, open('$(S3_DEV)','w'), indent=1)"; }
+	cd "$(ROOT)" && cf push -f cf/dev/versitygw.yml \
+	  --var access_key=$$(python3 -c "import json;print(json.load(open('$(S3_DEV)'))['access_key_id'])") \
+	  --var secret_key=$$(python3 -c "import json;print(json.load(open('$(S3_DEV)'))['secret_access_key'])")
+	@# --no-project: boto3 soll nicht in die Projektumgebung, es ist nur hier noetig.
+	cd "$(ROOT)" && uv run --no-project --with boto3 python cf/dev/s3_bucket.py $(S3_DEV)
+	@# Tag s3, weil cf/settings.py die Bindung ueber Tag oder Namen findet.
+	@if cf service wger-s3 >/dev/null 2>&1; then cf update-user-provided-service wger-s3 -p $(S3_DEV) -t s3; \
+	  else cf create-user-provided-service wger-s3 -p $(S3_DEV) -t s3; fi
+
 ## push-web: nur wger-web (erster Push, vor init)
 push-web: wheels
 	cd "$(ROOT)" && $(PUSH) wger-web
@@ -162,6 +181,34 @@ init:
 	@# kleiner als das Droplet (1,5G). Mehr als 2G Platte laesst die Plattform nicht zu.
 	cf run-task wger-web --name init --wait -m 2G -k 2G \
 	  --command "python -m wger bootstrap --no-process-static && python manage.py createcachetable && python manage.py set-site-url"
+
+## images-fetch: Uebungsbilder von wger.de in Storage und Datenbank laden (braucht ausgehendes Internet)
+images-fetch:
+	@# Upstream-Befehl; schreibt ueber den Default-Storage, auf CF also nach
+	@# S3. Ohne S3-Bindung landen die Dateien im fluechtigen Dateisystem des
+	@# Task-Containers und sind mit dessen Ende weg - nur die Datenbank-
+	@# eintraege blieben. Deshalb vorher s3-dev bzw. die S3-Bindung.
+	cf run-task wger-web --name images-fetch --wait -m 1G -k 2G \
+	  --command "python manage.py download-exercise-images"
+
+## images-export: Bilder und Datenbankeintraege aus der Instanz nach cf/exercise-images/ (fuer Plattformen ohne Internet)
+images-export:
+	@# Ueber SSH statt als Task: ein Task gibt nichts zurueck. -T: kein
+	@# Terminal, sonst ist der tar-Strom nicht binaer-sauber. appenv.sh gibt
+	@# der Sitzung Python-Umgebung und Arbeitsverzeichnis des laufenden
+	@# Prozesses; gefunden wird es ueber dessen Arbeitsverzeichnis, weil das
+	@# je Bauweise anders heisst (~/workspace bei cnb, ~/app beim Buildpack).
+	cd "$(ROOT)" && rm -rf cf/exercise-images && mkdir -p cf/exercise-images && \
+	  cf ssh -T wger-web -c 'cd $$(readlink /proc/$$(pgrep -o -f gunicorn)/cwd) && cf/appenv.sh python cf/exercise_images.py export -' \
+	  | tar -x -C cf/exercise-images
+	@cd "$(ROOT)" && echo "   $$(find cf/exercise-images/files -type f | wc -l) Dateien, $$(du -sh cf/exercise-images | cut -f1)"
+
+## images-import: cf/exercise-images/ in Storage und Datenbank der Instanz laden (idempotent)
+images-import:
+	@# Das Verzeichnis geht mit dem Push ins Droplet; der Task liest es von
+	@# dort. 1G reicht: das Skript haelt je ein Bild im Speicher.
+	cf run-task wger-web --name images-import --wait -m 1G -k 2G \
+	  --command "python cf/exercise_images.py import cf/exercise-images"
 
 ## logs: die letzten Zeilen von wger-web
 logs:

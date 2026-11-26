@@ -1,0 +1,37 @@
+---
+# versitygw als CF-App: der S3-Ersatz fuer die lokale Plattform, die kein S3
+# anbietet (cf marketplace, 2026-11-26). Nur zum Messen des S3-Zweigs von
+# cf/settings.py und zum Fuellen von cf/exercise-images/ - auf der
+# Zielplattform gibt es S3 als Dienst, und diese Datei wird dort nicht
+# gebraucht.
+#
+# versitygw statt MinIO: MinIO ist auf Docker Hub nicht mehr anonym ladbar
+# und auf quay.io ebenso wenig (gemessen 2026-11-26); versitygw (S3-Gateway
+# ueber ein Dateisystem) liegt auf Docker Hub und prueft Signaturen wie S3,
+# auch bei signierten URLs. Als Docker-App, weil es so am wenigsten kostet.
+# Der Bucket liegt im fluechtigen Dateisystem: ein Neustart der App leert
+# ihn, `make images-import` fuellt ihn wieder. Die Route traegt die Adresse,
+# unter der die App UND der Browser den Bucket erreichen (Apps erreichen
+# App-Routen; gemessen 2026-11-26). Zugangsdaten kommen aus
+# cf/dev/.s3-dev.json (gitignored), angelegt von `make -f cf/Makefile s3-dev`.
+version: 1
+applications:
+  - name: wger-s3-dev
+    docker:
+      image: versity/versitygw:v1.11.0
+    memory: 256M
+    disk_quota: 1G
+    instances: 1
+    health-check-type: port
+    # posix: Buckets sind Verzeichnisse unter dem genannten Pfad. /tmp, weil
+    # das Image sonst kein beschreibbares Verzeichnis mitbringt (kein /data,
+    # keine Shell fuer mkdir; gemessen 2026-11-26). CF reicht Anfragen auf
+    # $PORT (8080) durch; versitygw lauscht sonst auf 7070. Mit Adresse,
+    # nicht als ":8080": der Cloud Controller liest den Wert mit Rubys
+    # YAML-Parser, und dem ist ein Wort mit fuehrendem Doppelpunkt ein Symbol
+    # (500 "Tried to load unspecified class: Symbol", gemessen 2026-11-26).
+    command: versitygw posix /tmp
+    env:
+      VGW_PORT: 0.0.0.0:8080
+      ROOT_ACCESS_KEY: ((access_key))
+      ROOT_SECRET_KEY: ((secret_key))
