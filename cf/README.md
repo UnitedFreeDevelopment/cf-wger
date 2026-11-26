@@ -23,6 +23,7 @@ Wurzelverzeichnis.
 | Datei | Zweck |
 |---|---|
 | `cf/ANLEITUNG-ZIELPLATTFORM.md` | Schritt für Schritt für den Agenten auf der Zielplattform: messen, Dienste, LLM prüfen, pushen, zurückmelden |
+| `cf/berichte/` | Rückkanal von der Zielplattform: ein Bericht je Fehler, Abweichung, Messung, Optimierung oder Frage, Format in `cf/berichte/README.md`; der Entwickler setzt den Status |
 | `cf/settings.py` | Settings-Overlay: übersetzt `VCAP_SERVICES` in die Variablen, die `settings/main.py` liest, und importiert es danach |
 | `cf/storage.py` | whitenoise-Storage mit der Nachsicht von Upstream gegenüber fehlenden Source Maps |
 | `cf/manifest.yml` | drei Apps: `wger-web`, `wger-worker`, `wger-beat`; Lifecycle und Buildpack als Variablen |

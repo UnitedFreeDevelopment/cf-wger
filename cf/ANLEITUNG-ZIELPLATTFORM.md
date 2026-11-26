@@ -269,6 +269,19 @@ Hinein gehört, in `cf/README.md`:
   als Historie beschreiben, sondern ersetzen; die Historie steht im Commit.
 
 Was nicht ging, gehört genauso hinein, mit der Fehlermeldung im Wortlaut.
+Berichte (Schritt 8) und Änderungen an `cf/README.md` in getrennten Commits.
+
+## Schritt 8: Berichte
+
+Jeder Fehler, jede Abweichung zwischen Doku und Plattform, jede
+abgeschlossene „bitte prüfen"-Messung, jede Verbesserungsidee und jede
+offene Frage wird ein Bericht unter `cf/berichte/`: eine Datei je Sache,
+Format und Pflichtfelder in `cf/berichte/README.md`, Vorlage
+`cf/berichte/VORLAGE.md`. Die Berichte sind der Rückkanal zum Entwickler,
+der daraus die nächsten Änderungen an diesem Repo ableitet; was nur in
+einem Chat steht, erreicht ihn nicht. Ein Bericht ist auch dann fällig,
+wenn der Fehler umgangen wurde. `status` bleibt `offen`; den setzt der
+Entwickler.
 
 ## Rückfall
 
