@@ -90,10 +90,16 @@ Verhalten von `wger bootstrap`). **Danach ändern.**
 
 ## Was gemessen ist
 
-- Staging mit `paketobuildpacks/python` (Lifecycle `cnb`), CPython 3.13.18.
-  Im Container 1,1 GB: Layer 975 MB, davon CPython 370 MB und Pakete
-  597 MB, dazu 78 MB Anwendung mit vorgebautem `staticfiles/`. Droplet
-  gepackt 392 MB. Zum Vergleich der klassische `python_buildpack`: 1,5 GB.
+- Staging mit `paketobuildpacks/python` (Lifecycle `cnb`), CPython 3.13.18,
+  `DETECTOR=lingua`. Gemessen 2026-11-26: Upload 372 MB (davon
+  `cf/exercise-images/` 187 MB, `cf/wheels/` 166 MB, `staticfiles/` 49 MB),
+  Droplet gepackt 707 MB, im Container 1,4 GB bei 2 GB Quote: Layer 987 MB,
+  davon CPython 370 MB und Pakete 617 MB (lingua 292 MB), dazu 434 MB
+  App-Verzeichnis mit Übungsbildern 189 MB, Wheels 167 MB, `staticfiles/`
+  55 MB. lingua liegt also doppelt im Droplet, als Wheel und installiert;
+  mit `DETECTOR=llm` entfällt beides, erwartet rund 1,0 GB, nicht gemessen.
+  Zum Vergleich der klassische `python_buildpack` ohne Bilder und Wheels:
+  1,5 GB.
 - Was die Größe bestimmt und ohne Upstream-Änderung bleibt: `lingua`
   (306 MB, eine Binärdatei mit allen Sprachmodellen, von zwei Serializern
   beim Start importiert), `fontawesomefree` als pip-Paket (87 MB), Pakete
@@ -347,11 +353,12 @@ aus `cf/wheels/` findet (CPython 3.13, manylinux_2_17 x86_64), und dass
 - **Heroku-CNB als nächster Hebel**: `heroku/buildpack-python` braucht am
   Sample 290 MB weniger für Python als Paketo. Für wger: im Manifest den
   Buildpack tauschen, `.python-version` liegt schon bereit, dann messen.
-- **Größe im Container**: 1,1 GB bei 2 GB Quote, gemessen vor `cf/wheels/`
-  mit `DETECTOR=lingua`; das lingua-Wheel kommt mit dem App-Verzeichnis ins
-  Droplet, also rund 170 MB dazu, **bitte prüfen**. Mit `DETECTOR=llm`
-  entfallen Wheel und die 306 MB installiertes lingua, erwartet rund 800 MB,
-  nicht gemessen.
+- **Größe im Container**: 1,4 GB bei 2 GB Quote mit `DETECTOR=lingua`,
+  siehe „Was gemessen ist". Zwei Hebel, beide nicht gemessen: die
+  Übungsbilder nach `images-import` aus dem Droplet nehmen (sie liegen dann
+  in S3; kostet einen zweiten Push), und die Wheels unter `cf/wheels/`, die
+  nach der Installation totes Gewicht sind, der Paketo-Buildpack lässt das
+  App-Verzeichnis aber unverändert. Mit `DETECTOR=llm` erwartet rund 1,0 GB.
 - **Zielplattformen** (TAS und Vanilla-CF): dort ist nach bisherigem Stand
   beim Staging kein PyPI erreichbar und kein anonymer Docker-Pull möglich.
   Der Weg dafür steht unter „Auf eine andere Plattform", der Kenntnisstand
