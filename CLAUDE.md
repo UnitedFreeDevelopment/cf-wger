@@ -77,6 +77,28 @@ Upstream bringt drei Wege mit, django-allauth 65.21.1:
 
 wger ist selbst OIDC-Provider (`allauth.idp.oidc`) für API-Clients wie die Flutter-App; das ersetzt keinen IdP. Empfehlung: `openid_connect` lokal auf `cfk8s` gegen einen Keycloak messen, bevor es in `cf/ANLEITUNG-ZIELPLATTFORM.md` kommt; dort steht bislang nichts zu Identity.
 
+## Plattform: Cloud Foundry, nicht Kubernetes (entschieden 2026-11-26)
+
+wger bleibt eine CF-App. Begründung: Die App ist Web, Worker, Beat plus
+PostgreSQL, Broker und Object Storage; dafür reicht der Overlay unter `cf/`,
+und Routen, Bindungen, Tasks und Logs stellt die Plattform. Auf Kubernetes
+kämen Ingress, TLS, Secrets, Probes, Image-Build, Registry und Upgrades in
+unsere Hand. Was auf CF weh tat (flüchtiges Dateisystem, Droplet-Größe,
+Staging-Grenzen), ist mit S3 gelöst bzw. Plattformkonfiguration, kein
+Architekturproblem. Die Hürden der Zielplattform (kein PyPI beim Staging,
+kein anonymer Docker-Pull) treffen Kubernetes genauso.
+
+Neu entscheiden, wenn eines eintritt:
+- Das Staging auf der Zielplattform ist nicht hinzubekommen und es gibt
+  eine Registry. Dann vorgebautes Image, auf CF (`cf push --docker-image`)
+  oder Kubernetes.
+- Die Organisation stellt ein verwaltetes Kubernetes mit Image-Pipeline.
+- wger braucht etwas, das CF nicht kann: Sidecars, mehr als 2 GB Platte
+  für einen Task.
+
+Der Wechsel wäre im Code billig: Upstream liefert Docker-Image und
+Helm-Chart, `cf/settings.py` würde zu Umgebungsvariablen.
+
 ## Hinweise
 - Das CF-Dateisystem ist flüchtig: keine lokalen Uploads.
 - Stemcells sind BOSH-Plattformebene, für die App nicht relevant. Die App läuft auf dem Root-Filesystem der Plattform (z. B. `cflinuxfs4`).
